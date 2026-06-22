@@ -1,7 +1,6 @@
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
-pub type Json = Value;
 const CHAT_TOOL_NAME_MAX_LEN: usize = 64;
 const CUSTOM_TOOL_INPUT_FIELD: &str = "input";
 
@@ -132,15 +131,16 @@ impl ToolContext {
         let mut base = original
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+            .take(CHAT_TOOL_NAME_MAX_LEN)
             .collect::<String>();
-        if base.len() > CHAT_TOOL_NAME_MAX_LEN { base.truncate(CHAT_TOOL_NAME_MAX_LEN); }
         if base.is_empty() { base = "tool".to_string(); }
         let mut candidate = base.clone();
         let mut suffix = 2;
         while self.used.contains(&candidate) {
             let tail = format!("_{suffix}");
             let keep = CHAT_TOOL_NAME_MAX_LEN.saturating_sub(tail.len());
-            candidate = format!("{}{}", &base[..base.len().min(keep)], tail);
+            let head = base.chars().take(keep).collect::<String>();
+            candidate = format!("{head}{tail}");
             suffix += 1;
         }
         self.used.insert(candidate.clone());
