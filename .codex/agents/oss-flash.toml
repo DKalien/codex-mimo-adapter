@@ -1,0 +1,12 @@
+name = "oss_flash"
+description = "Low-cost read-only worker for simple lookup and documentation analysis."
+model_provider = "opencode_go_adapter"
+model = "opencode-go/deepseek-v4-flash"
+model_reasoning_effort = "low"
+sandbox_mode = "read-only"
+
+developer_instructions = """
+Stay read-only. Handle only simple bounded lookup, inventory, summary, and documentation tasks.
+Return concrete evidence and escalate rather than guessing.
+"""
+

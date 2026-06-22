@@ -1,0 +1,34 @@
+# IMPORTANT:
+# Merge this provider block into the user-level Codex configuration:
+#   Windows: %USERPROFILE%\.codex\config.toml
+# Do not place model_providers in this project's .codex/config.toml.
+# Codex ignores project-level model provider definitions.
+
+[model_providers.opencode_go_adapter]
+name = "OpenCode Go Adapter"
+base_url = "http://127.0.0.1:4010/v1"
+wire_api = "responses"
+request_max_retries = 0
+stream_max_retries = 0
+stream_idle_timeout_ms = 120000
+
+[model_providers.opencode_go_adapter.auth]
+command = "cmd.exe"
+args = ["/d", "/s", "/c", "echo codex-opencode-local"]
+timeout_ms = 1000
+
+[agents.oss_deepseek]
+description = "OpenCode Go DeepSeek worker"
+config_file = ".codex/agents/oss-deepseek.toml"
+
+[agents.oss_mimo]
+description = "OpenCode Go MiMo worker"
+config_file = ".codex/agents/oss-mimo.toml"
+
+[agents.oss_kimi]
+description = "Read-only OpenCode Go Kimi worker"
+config_file = ".codex/agents/oss-kimi.toml"
+
+[agents.oss_flash]
+description = "Read-only low-cost OpenCode Go Flash worker"
+config_file = ".codex/agents/oss-flash.toml"

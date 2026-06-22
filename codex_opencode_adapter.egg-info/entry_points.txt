@@ -1,0 +1,2 @@
+[console_scripts]
+codex-opencode-adapter = codex_opencode_adapter.server:main
