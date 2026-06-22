@@ -1,13 +1,11 @@
-use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use serde_json::{json, Value};
 use std::convert::Infallible;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
@@ -63,7 +61,7 @@ async fn responses(State(state): State<AppState>, headers: HeaderMap, body: Stri
         return error_response(StatusCode::PAYLOAD_TOO_LARGE, "request_too_large", "Invalid request size");
     }
     let body: Value = match serde_json::from_str(&body) {
-        Ok(Value::Object(_)) => serde_json::from_str(&body).unwrap(),
+        Ok(value @ Value::Object(_)) => value,
         Ok(_) => return error_response(StatusCode::BAD_REQUEST, "invalid_request_error", "request body must be an object"),
         Err(error) => return error_response(StatusCode::BAD_REQUEST, "invalid_request_error", &error.to_string()),
     };
