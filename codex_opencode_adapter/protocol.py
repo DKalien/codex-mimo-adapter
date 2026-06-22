@@ -26,6 +26,7 @@ def compact_json(value: Any) -> str:
 
 
 def as_text(value: Any) -> str:
+    """Best-effort text extraction for Responses and Chat content shapes."""
     if value is None:
         return ""
     if isinstance(value, str):
@@ -33,11 +34,14 @@ def as_text(value: Any) -> str:
     if isinstance(value, (int, float, bool)):
         return str(value)
     if isinstance(value, list):
-        parts = []
+        parts: list[str] = []
         for item in value:
             if isinstance(item, dict):
-                if item.get("type") in {"input_text", "output_text", "text"}:
-                    parts.append(str(item.get("text", "")))
+                kind = item.get("type")
+                if kind in {"input_text", "output_text", "text", "refusal"}:
+                    parts.append(str(item.get("text") or item.get("refusal") or ""))
+                elif kind in {"tool_result", "function_call_output"}:
+                    parts.append(as_text(item.get("content", item.get("output", ""))))
                 elif "content" in item:
                     parts.append(as_text(item["content"]))
                 elif "text" in item:
@@ -52,18 +56,24 @@ def as_text(value: Any) -> str:
             return str(value["text"])
         if "content" in value:
             return as_text(value["content"])
+        if "output" in value:
+            return as_text(value["output"])
         return compact_json(value)
     return str(value)
 
 
 def extract_request(body: JSON) -> tuple[list[JSON], list[JSON]]:
+    """Convert a Responses request body into incoming Chat messages and tool outputs.
+
+    This intentionally preserves replayed Responses function_call items as
+    assistant tool_calls because Chat Completions providers often need complete
+    alternating history to accept following tool messages.
+    """
     messages: list[JSON] = []
     tool_outputs: list[JSON] = []
 
     instructions = body.get("instructions")
     if instructions:
-        # OpenAI Responses uses developer instructions, while OpenCode Go's
-        # Chat Completions schema accepts system but not developer messages.
         messages.append({"role": "system", "content": as_text(instructions)})
 
     raw_input = body.get("input", [])
@@ -74,17 +84,34 @@ def extract_request(body: JSON) -> tuple[list[JSON], list[JSON]]:
     if not isinstance(raw_input, list):
         raise ValueError("input must be a string, object, or list")
 
+    pending_assistant_calls: list[JSON] = []
+
+    def flush_pending_calls() -> None:
+        nonlocal pending_assistant_calls
+        if pending_assistant_calls:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": pending_assistant_calls,
+                }
+            )
+            pending_assistant_calls = []
+
     for item in raw_input:
         if isinstance(item, str):
+            flush_pending_calls()
             messages.append({"role": "user", "content": item})
             continue
         if not isinstance(item, dict):
             continue
+
         kind = str(item.get("type", ""))
         if kind == "function_call_output":
             call_id = str(item.get("call_id") or "")
             if not call_id:
                 raise HistoryError("function_call_output requires call_id")
+            flush_pending_calls()
             tool_outputs.append(
                 {
                     "role": "tool",
@@ -93,31 +120,40 @@ def extract_request(body: JSON) -> tuple[list[JSON], list[JSON]]:
                 }
             )
             continue
+
+        if kind == "function_call":
+            pending_assistant_calls.append(
+                {
+                    "id": str(item.get("call_id") or item.get("id") or new_id("call")),
+                    "type": "function",
+                    "function": {
+                        "name": str(item.get("name") or "tool"),
+                        "arguments": _arguments_text(item.get("arguments", "{}")),
+                    },
+                }
+            )
+            continue
+
+        if kind in {"reasoning", "summary"}:
+            # Reasoning items are not forwarded as visible chat content. Hidden
+            # reasoning from upstream is stored only for replay continuity.
+            continue
+
         if kind in {"message", ""} or item.get("role"):
+            flush_pending_calls()
             role = str(item.get("role") or "user")
             if role == "developer":
                 role = "system"
+            if role not in {"system", "user", "assistant", "tool"}:
+                role = "user"
             messages.append({"role": role, "content": as_text(item.get("content", ""))})
             continue
-        if kind == "function_call":
-            # Responses may replay previous output items in input. Preserve them as
-            # an assistant tool call for providers that need complete chat history.
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [
-                        {
-                            "id": str(item.get("call_id") or new_id("call")),
-                            "type": "function",
-                            "function": {
-                                "name": str(item.get("name") or "tool"),
-                                "arguments": _arguments_text(item.get("arguments", "{}")),
-                            },
-                        }
-                    ],
-                }
-            )
+
+        if kind in {"input_text", "output_text", "text"}:
+            flush_pending_calls()
+            messages.append({"role": "user", "content": as_text(item)})
+
+    flush_pending_calls()
     return messages, tool_outputs
 
 
@@ -135,14 +171,29 @@ def merge_new_messages(base: list[JSON], incoming: list[JSON]) -> list[JSON]:
 
 
 def normalize_upstream_roles(messages: list[JSON]) -> list[JSON]:
-    """Return messages using only roles accepted by OpenCode Go."""
-    normalized: list[JSON] = []
+    """Return messages using only roles accepted by OpenCode Go.
+
+    Multiple system/developer messages are collapsed to the first position. This
+    mirrors the strict-provider hardening used by mature bridges and avoids
+    upstreams that reject system messages in the middle of a conversation.
+    """
+    system_chunks: list[str] = []
+    rest: list[JSON] = []
     for message in messages:
         item = dict(message)
         if item.get("role") == "developer":
             item["role"] = "system"
-        normalized.append(item)
-    return normalized
+        if item.get("role") == "system":
+            text = as_text(item.get("content"))
+            if text:
+                system_chunks.append(text)
+            continue
+        if item.get("role") not in {"user", "assistant", "tool"}:
+            item["role"] = "user"
+        rest.append(item)
+    if system_chunks:
+        return [{"role": "system", "content": "\n\n".join(system_chunks)}] + rest
+    return rest
 
 
 def repair_history(
@@ -172,32 +223,45 @@ def repair_history(
 
 
 _SAFE_TOOL_NAME = re.compile(r"[^a-zA-Z0-9_-]")
+CHAT_TOOL_NAME_MAX_LEN = 64
+CUSTOM_TOOL_INPUT_FIELD = "input"
+
+
+def _safe_tool_name(name: str, used: set[str]) -> str:
+    base = _SAFE_TOOL_NAME.sub("_", name.strip())[:CHAT_TOOL_NAME_MAX_LEN] or "tool"
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        tail = f"_{suffix}"
+        candidate = f"{base[: CHAT_TOOL_NAME_MAX_LEN - len(tail)]}{tail}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
+def _tool_source(item: JSON) -> JSON | None:
+    nested = item.get("function")
+    return nested if isinstance(nested, dict) else item
 
 
 def convert_tools(tools: Any) -> tuple[list[JSON], dict[str, str]]:
+    """Convert Responses tools to Chat Completions tools.
+
+    Supports normal function tools plus a conservative lowering of Responses
+    namespace/custom/tool_search tools to Chat function tools.
+    """
     if not isinstance(tools, list):
         return [], {}
     converted: list[JSON] = []
     reverse: dict[str, str] = {}
     used: set[str] = set()
-    for item in tools:
-        if not isinstance(item, dict):
-            continue
-        nested = item.get("function")
-        source = nested if isinstance(nested, dict) else item
-        if not isinstance(source, dict):
-            continue
-        original = str(source.get("name") or "").strip()
+
+    def add_function(source: JSON, *, original_name: str | None = None) -> None:
+        original = str(original_name or source.get("name") or "").strip()
         if not original:
-            continue
-        safe = _SAFE_TOOL_NAME.sub("_", original)[:64] or "tool"
-        candidate = safe
-        suffix = 2
-        while candidate in used:
-            candidate = f"{safe[:58]}_{suffix}"
-            suffix += 1
-        used.add(candidate)
-        reverse[candidate] = original
+            return
+        safe = _safe_tool_name(original, used)
+        reverse[safe] = original
         parameters = source.get("parameters")
         if not isinstance(parameters, dict):
             parameters = {"type": "object", "properties": {}}
@@ -205,17 +269,98 @@ def convert_tools(tools: Any) -> tuple[list[JSON], dict[str, str]]:
             {
                 "type": "function",
                 "function": {
-                    "name": candidate,
+                    "name": safe,
                     "description": str(source.get("description") or ""),
                     "parameters": parameters,
                 },
             }
         )
+
+    def add_custom(source: JSON) -> None:
+        original = str(source.get("name") or "").strip()
+        if not original:
+            return
+        description = str(source.get("description") or "")
+        preserved = compact_json(source)
+        add_function(
+            {
+                "name": original,
+                "description": (
+                    f"{description}\n\nOriginal Responses custom tool definition:\n{preserved}"
+                    if description
+                    else f"Original Responses custom tool definition:\n{preserved}"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        CUSTOM_TOOL_INPUT_FIELD: {
+                            "type": "string",
+                            "description": "Raw string input for the original custom tool.",
+                        }
+                    },
+                    "required": [CUSTOM_TOOL_INPUT_FIELD],
+                },
+            }
+        )
+
+    def add_namespace(source: JSON) -> None:
+        namespace = str(source.get("name") or "").strip()
+        children = source.get("tools") or source.get("children") or []
+        if not namespace or not isinstance(children, list):
+            return
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            child_source = _tool_source(child)
+            if not isinstance(child_source, dict):
+                continue
+            child_name = str(child_source.get("name") or "").strip()
+            if child_name:
+                add_function(child_source, original_name=f"{namespace}__{child_name}")
+
+    for item in tools:
+        if isinstance(item, str):
+            add_custom({"type": "custom", "name": item})
+            continue
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("type") or "function")
+        if kind == "namespace":
+            add_namespace(item)
+        elif kind in {"custom", "tool_search"}:
+            add_custom(item)
+        else:
+            source = _tool_source(item)
+            if isinstance(source, dict):
+                add_function(source)
     return converted, reverse
 
 
 def restore_tool_name(name: str, reverse: dict[str, str]) -> str:
     return reverse.get(name, name)
+
+
+def _convert_tool_choice(tool_choice: Any, reverse: dict[str, str]) -> Any:
+    if tool_choice is None:
+        return None
+    if isinstance(tool_choice, str):
+        if tool_choice == "required":
+            return "required"
+        return tool_choice
+    if not isinstance(tool_choice, dict):
+        return tool_choice
+    kind = tool_choice.get("type")
+    if kind == "function":
+        name = str(tool_choice.get("name") or "")
+        chat_name = next((safe for safe, original in reverse.items() if original == name), name)
+        return {"type": "function", "function": {"name": chat_name}}
+    if kind == "tool":
+        name = str(tool_choice.get("name") or "")
+        chat_name = next((safe for safe, original in reverse.items() if original == name), name)
+        return {"type": "function", "function": {"name": chat_name}}
+    if kind in {"auto", "none", "required"}:
+        return kind
+    return tool_choice
 
 
 def build_chat_payload(
@@ -247,6 +392,11 @@ def build_chat_payload(
     }
     if tools:
         payload["tools"] = tools
+        choice = _convert_tool_choice(body.get("tool_choice"), reverse)
+        if choice is not None:
+            payload["tool_choice"] = choice
+        if body.get("parallel_tool_calls") is not None:
+            payload["parallel_tool_calls"] = bool(body.get("parallel_tool_calls"))
     for source, target in (
         ("temperature", "temperature"),
         ("top_p", "top_p"),
@@ -254,9 +404,14 @@ def build_chat_payload(
         ("max_tokens", "max_tokens"),
         ("presence_penalty", "presence_penalty"),
         ("frequency_penalty", "frequency_penalty"),
+        ("response_format", "response_format"),
+        ("seed", "seed"),
+        ("stop", "stop"),
     ):
         if body.get(source) is not None:
             payload[target] = body[source]
+    if payload["stream"]:
+        payload["stream_options"] = {"include_usage": True}
     payload.update(reasoning_parameter)
     return payload, messages, reverse
 
@@ -276,11 +431,7 @@ def build_response(
     choice = (chat_response.get("choices") or [{}])[0]
     message = choice.get("message") or {}
     content = as_text(message.get("content"))
-    reasoning = (
-        message.get("reasoning_content")
-        or message.get("reasoning")
-        or message.get("thinking")
-    )
+    reasoning = _reasoning_text(message)
     thinking_blocks = message.get("thinking_blocks")
     response_id = response_id or new_id("resp")
     created_at = created_at or int(time.time())
@@ -294,6 +445,8 @@ def build_response(
     output: list[JSON] = []
     if reasoning:
         output.append({"type": "reasoning", "id": new_id("rs"), "summary": []})
+    if content:
+        output.append(_message_item(content))
 
     pending: list[str] = []
     replay_calls: list[JSON] = []
@@ -301,7 +454,9 @@ def build_response(
         function = call.get("function") or {}
         raw_name = str(function.get("name") or call.get("name") or "tool")
         call_id = str(call.get("id") or call.get("call_id") or new_id("call"))
-        arguments = _arguments_text(function.get("arguments", call.get("arguments", "{}")))
+        arguments = canonicalize_json_string_if_parseable(
+            _arguments_text(function.get("arguments", call.get("arguments", "{}")))
+        )
         replay_calls.append(
             {
                 "id": call_id,
@@ -322,8 +477,6 @@ def build_response(
         )
     if replay_calls:
         assistant["tool_calls"] = replay_calls
-    if content and not pending:
-        output.append(_message_item(content))
 
     messages = repair_history(base_messages) + [assistant]
     state_put(
@@ -374,6 +527,7 @@ class StreamAssembler:
     next_output_index: int = 0
     text_output_index: int | None = None
     message_item_id: str = field(default_factory=lambda: new_id("msg"))
+    text_done: bool = False
     terminal_emitted: bool = False
 
     def start(self) -> None:
@@ -414,9 +568,9 @@ class StreamAssembler:
             self.usage = chunk["usage"]
         for choice in chunk.get("choices") or []:
             delta = choice.get("delta") or {}
-            for key in ("reasoning_content", "reasoning", "thinking"):
-                if delta.get(key):
-                    self.reasoning_parts.append(as_text(delta[key]))
+            reasoning_delta = _reasoning_text(delta)
+            if reasoning_delta:
+                self.reasoning_parts.append(reasoning_delta)
             if delta.get("thinking_blocks"):
                 self.thinking_blocks.append(delta["thinking_blocks"])
             if delta.get("content") is not None:
@@ -450,6 +604,10 @@ class StreamAssembler:
         if self.thinking_blocks:
             assistant["thinking_blocks"] = self.thinking_blocks
 
+        if content:
+            self._finish_text_item()
+            output.append(_message_item(content, item_id=self.message_item_id))
+
         replay_calls: list[JSON] = []
         pending: list[str] = []
         for index in sorted(self.tool_calls):
@@ -462,7 +620,7 @@ class StreamAssembler:
                 self._emit_tool_arguments(call, call["arguments"][emitted:])
             call_id = call["id"]
             raw_name = call["name"] or "tool"
-            arguments = call["arguments"] or "{}"
+            arguments = canonicalize_json_string_if_parseable(call["arguments"] or "{}")
             replay_calls.append(
                 {
                     "id": call_id,
@@ -501,39 +659,6 @@ class StreamAssembler:
             )
         if replay_calls:
             assistant["tool_calls"] = replay_calls
-        if content and not pending:
-            self._ensure_text_started()
-            message_item = _message_item(content, item_id=self.message_item_id)
-            output.append(message_item)
-            self._emit(
-                "response.output_text.done",
-                {
-                    "type": "response.output_text.done",
-                    "output_index": self.text_output_index,
-                    "content_index": 0,
-                    "item_id": self.message_item_id,
-                    "text": content,
-                },
-            )
-            part = {"type": "output_text", "text": content, "annotations": []}
-            self._emit(
-                "response.content_part.done",
-                {
-                    "type": "response.content_part.done",
-                    "output_index": self.text_output_index,
-                    "content_index": 0,
-                    "item_id": self.message_item_id,
-                    "part": part,
-                },
-            )
-            self._emit(
-                "response.output_item.done",
-                {
-                    "type": "response.output_item.done",
-                    "output_index": self.text_output_index,
-                    "item": message_item,
-                },
-            )
 
         self.state_put(
             StoredResponse(
@@ -580,10 +705,7 @@ class StreamAssembler:
             "type": str(error_type or "upstream_error"),
             "message": str(message or "Upstream stream failed")[:1000],
         }
-        self._emit(
-            "response.failed",
-            {"type": "response.failed", "response": response},
-        )
+        self._emit("response.failed", {"type": "response.failed", "response": response})
         self.terminal_emitted = True
         return response
 
@@ -607,8 +729,9 @@ class StreamAssembler:
         function = delta.get("function") or {}
         if delta.get("id"):
             state["id"] = str(delta["id"])
-        if function.get("name") or delta.get("name"):
-            state["name"] += str(function.get("name") or delta.get("name"))
+        name_delta = function.get("name") if function.get("name") is not None else delta.get("name")
+        if name_delta:
+            state["name"] += str(name_delta)
             self._ensure_tool_started(state)
         arguments = function.get("arguments", delta.get("arguments"))
         if arguments is not None:
@@ -647,9 +770,46 @@ class StreamAssembler:
             },
         )
 
+    def _finish_text_item(self) -> None:
+        if self.text_output_index is None or self.text_done:
+            return
+        content = "".join(self.content_parts)
+        self._emit(
+            "response.output_text.done",
+            {
+                "type": "response.output_text.done",
+                "output_index": self.text_output_index,
+                "content_index": 0,
+                "item_id": self.message_item_id,
+                "text": content,
+            },
+        )
+        part = {"type": "output_text", "text": content, "annotations": []}
+        self._emit(
+            "response.content_part.done",
+            {
+                "type": "response.content_part.done",
+                "output_index": self.text_output_index,
+                "content_index": 0,
+                "item_id": self.message_item_id,
+                "part": part,
+            },
+        )
+        self._emit(
+            "response.output_item.done",
+            {
+                "type": "response.output_item.done",
+                "output_index": self.text_output_index,
+                "item": _message_item(content, item_id=self.message_item_id),
+            },
+        )
+        self.text_done = True
+
     def _ensure_tool_started(self, state: JSON) -> None:
         if state["added"] or not state["name"]:
             return
+        if self.text_output_index is not None and not self.text_done:
+            self._finish_text_item()
         state["output_index"] = self._allocate_output_index()
         state["added"] = True
         self._emit(
@@ -702,6 +862,21 @@ def _arguments_text(value: Any) -> str:
     return value if isinstance(value, str) else compact_json(value)
 
 
+def canonicalize_json_string_if_parseable(value: str) -> str:
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return value
+    return compact_json(parsed)
+
+
+def _reasoning_text(value: JSON) -> str:
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        if value.get(key):
+            return as_text(value[key])
+    return ""
+
+
 def _message_item(content: str, *, item_id: str | None = None) -> JSON:
     return {
         "type": "message",
@@ -716,8 +891,10 @@ def _completion_status(
     content: str, pending: list[str], finish_reason: Any
 ) -> tuple[str, JSON | None]:
     reason = str(finish_reason or "")
-    if not content and not pending and reason in {"length", "max_tokens"}:
+    if reason in {"length", "max_tokens"}:
         return "incomplete", {"reason": "max_output_tokens"}
+    if reason in {"content_filter", "safety"}:
+        return "incomplete", {"reason": "content_filter"}
     return "completed", None
 
 
@@ -732,8 +909,20 @@ def _response_shell(
     status: str,
     incomplete_details: JSON | None = None,
 ) -> JSON:
-    input_tokens = usage.get("prompt_tokens", usage.get("input_tokens", 0))
-    output_tokens = usage.get("completion_tokens", usage.get("output_tokens", 0))
+    input_tokens = usage.get("input_tokens", usage.get("prompt_tokens", 0))
+    output_tokens = usage.get("output_tokens", usage.get("completion_tokens", 0))
+    total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
+    input_details = usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
+    output_details = usage.get("output_tokens_details") or usage.get("completion_tokens_details") or {}
+    response_usage: JSON = {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+    if input_details:
+        response_usage["input_tokens_details"] = input_details
+    if output_details:
+        response_usage["output_tokens_details"] = output_details
     return {
         "id": response_id,
         "object": "response",
@@ -744,13 +933,9 @@ def _response_shell(
         "instructions": body.get("instructions"),
         "model": model,
         "output": output,
-        "parallel_tool_calls": False,
+        "parallel_tool_calls": bool(body.get("parallel_tool_calls", False)),
         "previous_response_id": body.get("previous_response_id"),
         "store": False,
-        "usage": {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": usage.get("total_tokens", input_tokens + output_tokens),
-        },
+        "usage": response_usage,
         "metadata": body.get("metadata") or {},
     }
