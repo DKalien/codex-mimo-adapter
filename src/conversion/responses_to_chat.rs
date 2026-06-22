@@ -99,7 +99,7 @@ pub fn extract_request(body: &Value) -> Result<(Vec<Value>, Vec<Value>), History
     let raw_input = body.get("input").cloned().unwrap_or_else(|| Value::Array(vec![]));
     let items = match raw_input {
         Value::String(text) => vec![json!({"role":"user","content":text})],
-        Value::Object(_) => vec![raw_input],
+        object @ Value::Object(_) => vec![object],
         Value::Array(items) => items,
         _ => return Err(HistoryError::Invalid("input must be a string, object, or list".to_string())),
     };
@@ -127,10 +127,11 @@ pub fn extract_request(body: &Value) -> Result<(Vec<Value>, Vec<Value>), History
                     return Err(HistoryError::Invalid("function_call_output requires call_id".to_string()));
                 }
                 flush_pending(&mut messages, &mut pending_calls);
+                let empty = Value::String(String::new());
                 tool_outputs.push(json!({
                     "role":"tool",
                     "tool_call_id":call_id,
-                    "content":as_text(obj.get("output").unwrap_or(&Value::String(String::new()))),
+                    "content":as_text(obj.get("output").unwrap_or(&empty)),
                 }));
             }
             "function_call" => {
@@ -149,7 +150,8 @@ pub fn extract_request(body: &Value) -> Result<(Vec<Value>, Vec<Value>), History
                 let mut role = obj.get("role").and_then(Value::as_str).unwrap_or("user").to_string();
                 if role == "developer" { role = "system".to_string(); }
                 if !matches!(role.as_str(), "system" | "user" | "assistant" | "tool") { role = "user".to_string(); }
-                messages.push(json!({"role":role,"content":as_text(obj.get("content").unwrap_or(&Value::String(String::new())))}));
+                let empty = Value::String(String::new());
+                messages.push(json!({"role":role,"content":as_text(obj.get("content").unwrap_or(&empty))}));
             }
             "input_text" | "output_text" | "text" => {
                 flush_pending(&mut messages, &mut pending_calls);
