@@ -30,12 +30,20 @@ where
     let created_at = now_ts();
 
     let mut assistant = json!({"role":"assistant","content":content});
-    if !reasoning.is_empty() { assistant["reasoning_content"] = Value::String(reasoning.clone()); }
-    if let Some(blocks) = message.get("thinking_blocks") { assistant["thinking_blocks"] = blocks.clone(); }
+    if !reasoning.is_empty() {
+        assistant["reasoning_content"] = Value::String(reasoning.clone());
+    }
+    if let Some(blocks) = message.get("thinking_blocks") {
+        assistant["thinking_blocks"] = blocks.clone();
+    }
 
     let mut output = Vec::new();
-    if !reasoning.is_empty() { output.push(reasoning_item(&reasoning, None)); }
-    if !content.is_empty() { output.push(message_item(&content, None)); }
+    if !reasoning.is_empty() {
+        output.push(reasoning_item(&reasoning, None));
+    }
+    if !content.is_empty() {
+        output.push(message_item(&content, None));
+    }
 
     let mut pending = Vec::new();
     let mut replay_calls = Vec::new();
@@ -57,13 +65,17 @@ where
             }));
         }
     }
-    if !replay_calls.is_empty() { assistant["tool_calls"] = Value::Array(replay_calls); }
+    if !replay_calls.is_empty() {
+        assistant["tool_calls"] = Value::Array(replay_calls);
+    }
 
+    let mut stored_messages = repair_history(base_messages, None)?;
+    stored_messages.push(assistant);
     state_put(StoredResponse {
         response_id: response_id.clone(),
         model_alias: model_alias.to_string(),
         model_upstream: model_upstream.to_string(),
-        messages: repair_history(base_messages, None)? .into_iter().chain(std::iter::once(assistant)).collect(),
+        messages: stored_messages,
         pending_call_ids: pending.clone(),
         output: output.clone(),
         created_at,
@@ -115,8 +127,12 @@ pub fn response_shell(
     let output_tokens = usage.get("output_tokens").or_else(|| usage.get("completion_tokens")).and_then(Value::as_i64).unwrap_or(0);
     let total_tokens = usage.get("total_tokens").and_then(Value::as_i64).unwrap_or(input_tokens + output_tokens);
     let mut response_usage = json!({"input_tokens":input_tokens,"output_tokens":output_tokens,"total_tokens":total_tokens});
-    if let Some(details) = usage.get("input_tokens_details").or_else(|| usage.get("prompt_tokens_details")) { response_usage["input_tokens_details"] = details.clone(); }
-    if let Some(details) = usage.get("output_tokens_details").or_else(|| usage.get("completion_tokens_details")) { response_usage["output_tokens_details"] = details.clone(); }
+    if let Some(details) = usage.get("input_tokens_details").or_else(|| usage.get("prompt_tokens_details")) {
+        response_usage["input_tokens_details"] = details.clone();
+    }
+    if let Some(details) = usage.get("output_tokens_details").or_else(|| usage.get("completion_tokens_details")) {
+        response_usage["output_tokens_details"] = details.clone();
+    }
     json!({
         "id": response_id,
         "object":"response",
