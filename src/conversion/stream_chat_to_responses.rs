@@ -1,5 +1,6 @@
 use crate::state::{now_ts, StoredResponse};
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, HashMap};
 use uuid::Uuid;
 
 use super::chat_to_responses::{completion_status, message_item, reasoning_item, response_shell};
@@ -8,19 +9,44 @@ use super::text::{arguments_text, as_text, canonicalize_json_string_if_parseable
 
 pub type EmitFn = Box<dyn FnMut(&str, Value) -> anyhow::Result<()> + Send>;
 
+#[derive(Debug, Clone)]
+struct StreamingToolCall {
+    output_index: Option<u32>,
+    item_id: String,
+    call_id: String,
+    name: String,
+    arguments: String,
+    added: bool,
+    done: bool,
+}
+
+impl StreamingToolCall {
+    fn new() -> Self {
+        Self {
+            output_index: None,
+            item_id: format!("fc_{}", Uuid::new_v4().simple()),
+            call_id: String::new(),
+            name: String::new(),
+            arguments: String::new(),
+            added: false,
+            done: false,
+        }
+    }
+}
+
 pub struct StreamAssembler {
     body: Value,
     model_alias: String,
     model_upstream: String,
     base_messages: Vec<Value>,
-    reverse_names: std::collections::HashMap<String, String>,
+    reverse_names: HashMap<String, String>,
     state_put: Box<dyn FnMut(StoredResponse) -> anyhow::Result<()> + Send>,
     emit: EmitFn,
     response_id: String,
     created_at: i64,
     content: String,
     reasoning: String,
-    tool_calls: std::collections::BTreeMap<usize, Value>,
+    tool_calls: BTreeMap<usize, StreamingToolCall>,
     usage: Value,
     finish_reason: Option<String>,
     sequence: u64,
@@ -40,7 +66,7 @@ impl StreamAssembler {
         model_alias: String,
         model_upstream: String,
         base_messages: Vec<Value>,
-        reverse_names: std::collections::HashMap<String, String>,
+        reverse_names: HashMap<String, String>,
         state_put: Box<dyn FnMut(StoredResponse) -> anyhow::Result<()> + Send>,
         emit: EmitFn,
     ) -> Self {
@@ -112,6 +138,9 @@ impl StreamAssembler {
     }
 
     pub fn finalize(&mut self) -> anyhow::Result<Value> {
+        if self.terminal_emitted {
+            return Ok(json!({}));
+        }
         if !self.reasoning.is_empty() {
             self.finish_reasoning_item()?;
         }
@@ -132,15 +161,58 @@ impl StreamAssembler {
         let mut replay_calls = Vec::new();
         let keys: Vec<usize> = self.tool_calls.keys().copied().collect();
         for key in keys {
-            let call = self.tool_calls.get(&key).cloned().unwrap_or_else(|| json!({}));
-            let raw_name = call.get("name").and_then(Value::as_str).unwrap_or("tool").to_string();
-            let call_id = call.get("id").and_then(Value::as_str).unwrap_or("call_0").to_string();
-            let item_id = call.get("item_id").and_then(Value::as_str).unwrap_or("fc_0").to_string();
-            let output_index = match call.get("output_index").and_then(Value::as_u64) {
-                Some(value) => value as u32,
-                None => self.allocate_output_index(),
+            if self.tool_calls.get(&key).map(|call| call.done).unwrap_or(true) {
+                continue;
+            }
+            if self.tool_calls.get(&key).map(|call| call.name.is_empty()).unwrap_or(true) {
+                if let Some(call) = self.tool_calls.get_mut(&key) {
+                    call.done = true;
+                }
+                tracing::warn!(index = key, "skipping streaming tool call with missing name");
+                continue;
+            }
+
+            if self.tool_calls.get(&key).map(|call| !call.added).unwrap_or(false) {
+                let output_index = self.allocate_output_index();
+                let (item_id, call_id, raw_name) = {
+                    let call = self.tool_calls.get_mut(&key).expect("tool call exists");
+                    if call.call_id.is_empty() {
+                        call.call_id = format!("call_{key}");
+                    }
+                    call.output_index = Some(output_index);
+                    call.added = true;
+                    (call.item_id.clone(), call.call_id.clone(), call.name.clone())
+                };
+                let restored_name = self.reverse_names.get(&raw_name).cloned().unwrap_or(raw_name);
+                let item = json!({"type":"function_call","id":item_id,"call_id":call_id,"name":restored_name,"arguments":"","status":"in_progress"});
+                self.emit_event("response.output_item.added", json!({"type":"response.output_item.added","output_index":output_index,"item":item}))?;
+            }
+
+            let needs_output_index = self.tool_calls.get(&key).and_then(|call| call.output_index).is_none();
+            let assigned_output_index = if needs_output_index {
+                Some(self.allocate_output_index())
+            } else {
+                None
             };
-            let arguments = canonicalize_json_string_if_parseable(call.get("arguments").and_then(Value::as_str).unwrap_or("{}"));
+            let (output_index, item_id, call_id, raw_name, arguments) = {
+                let call = self.tool_calls.get_mut(&key).expect("tool call exists");
+                if call.call_id.is_empty() {
+                    call.call_id = format!("call_{key}");
+                }
+                if let Some(output_index) = assigned_output_index {
+                    call.output_index = Some(output_index);
+                }
+                let output_index = call.output_index.unwrap_or(0);
+                let arguments = canonicalize_json_string_if_parseable(&call.arguments);
+                call.done = true;
+                (
+                    output_index,
+                    call.item_id.clone(),
+                    call.call_id.clone(),
+                    call.name.clone(),
+                    arguments,
+                )
+            };
             replay_calls.push(json!({"id":call_id.clone(),"type":"function","function":{"name":raw_name.clone(),"arguments":arguments.clone()}}));
             pending.push(call_id.clone());
             let restored_name = self.reverse_names.get(&raw_name).cloned().unwrap_or(raw_name);
@@ -242,32 +314,51 @@ impl StreamAssembler {
     }
 
     fn accept_tool_delta(&mut self, delta: &Value) -> anyhow::Result<()> {
-        let index = delta.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-        let new_id = delta.get("id").and_then(Value::as_str).map(ToString::to_string);
+        let Some(index) = delta.get("index").and_then(Value::as_u64).map(|value| value as usize) else {
+            tracing::warn!("skipping streaming tool call delta without index");
+            return Ok(());
+        };
+        let new_id = delta.get("id").and_then(Value::as_str).filter(|value| !value.is_empty()).map(ToString::to_string);
         let function = delta.get("function").unwrap_or(&Value::Null);
-        let name_delta = function.get("name").or_else(|| delta.get("name")).and_then(Value::as_str).map(ToString::to_string);
-        let args_delta = function.get("arguments").or_else(|| delta.get("arguments")).map(|value| arguments_text(Some(value)));
+        let name_delta = function
+            .get("name")
+            .or_else(|| delta.get("name"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
+        let args_delta = function
+            .get("arguments")
+            .or_else(|| delta.get("arguments"))
+            .map(|value| arguments_text(Some(value)))
+            .filter(|value| !value.is_empty());
 
         let mut emit_args: Option<String> = None;
         {
-            let entry = self.tool_calls.entry(index).or_insert_with(|| json!({
-                "id": new_id.clone().unwrap_or_else(|| format!("call_{}", Uuid::new_v4().simple())),
-                "item_id": format!("fc_{}", Uuid::new_v4().simple()),
-                "name":"",
-                "arguments":"",
-                "added":false,
-            }));
+            let entry = self.tool_calls.entry(index).or_insert_with(StreamingToolCall::new);
             if let Some(id) = new_id {
-                entry["id"] = Value::String(id);
+                if entry.added {
+                    if entry.call_id.is_empty() {
+                        entry.call_id = id;
+                    } else if entry.call_id != id {
+                        tracing::warn!(index, existing = %entry.call_id, incoming = %id, "ignoring streaming tool call id change after start");
+                    }
+                } else {
+                    entry.call_id = id;
+                }
             }
             if let Some(name) = name_delta {
-                let prior = entry.get("name").and_then(Value::as_str).unwrap_or("").to_string();
-                entry["name"] = Value::String(format!("{prior}{name}"));
+                if entry.added {
+                    if entry.name != name {
+                        tracing::warn!(index, existing = %entry.name, incoming = %name, "ignoring streaming tool call name change after start");
+                    }
+                } else {
+                    entry.name = name;
+                }
             }
             if let Some(part) = args_delta {
-                let prior = entry.get("arguments").and_then(Value::as_str).unwrap_or("").to_string();
-                entry["arguments"] = Value::String(format!("{prior}{part}"));
-                if entry.get("added").and_then(Value::as_bool).unwrap_or(false) {
+                let was_added = entry.added;
+                entry.arguments.push_str(&part);
+                if was_added {
                     emit_args = Some(part);
                 }
             }
@@ -280,9 +371,12 @@ impl StreamAssembler {
     }
 
     fn ensure_tool_started(&mut self, index: usize) -> anyhow::Result<()> {
-        let already = self.tool_calls.get(&index).and_then(|e| e.get("added")).and_then(Value::as_bool).unwrap_or(false);
-        let name = self.tool_calls.get(&index).and_then(|e| e.get("name")).and_then(Value::as_str).unwrap_or("").to_string();
-        if already || name.is_empty() {
+        let should_start = self
+            .tool_calls
+            .get(&index)
+            .map(|entry| !entry.added && !entry.call_id.is_empty() && !entry.name.is_empty())
+            .unwrap_or(false);
+        if !should_start {
             return Ok(());
         }
         if !self.content.is_empty() && !self.text_done {
@@ -292,23 +386,43 @@ impl StreamAssembler {
             self.finish_reasoning_item()?;
         }
         let output_index = self.allocate_output_index();
-        let restored = self.reverse_names.get(&name).cloned().unwrap_or(name);
-        let item: Value;
-        {
-            let entry = self.tool_calls.get_mut(&index).unwrap();
-            entry["output_index"] = Value::from(output_index);
-            entry["added"] = Value::Bool(true);
-            item = json!({"type":"function_call","id":entry["item_id"].clone(),"call_id":entry["id"].clone(),"name":restored,"arguments":"","status":"in_progress"});
+        let (item_id, call_id, raw_name, pending_arguments) = {
+            let entry = self.tool_calls.get_mut(&index).expect("tool call exists");
+            entry.output_index = Some(output_index);
+            entry.added = true;
+            (
+                entry.item_id.clone(),
+                entry.call_id.clone(),
+                entry.name.clone(),
+                entry.arguments.clone(),
+            )
+        };
+        let restored = self.reverse_names.get(&raw_name).cloned().unwrap_or(raw_name);
+        let item = json!({"type":"function_call","id":item_id,"call_id":call_id,"name":restored,"arguments":"","status":"in_progress"});
+        self.emit_event("response.output_item.added", json!({"type":"response.output_item.added","output_index":output_index,"item":item}))?;
+        if !pending_arguments.is_empty() {
+            self.emit_tool_arguments(index, &pending_arguments)?;
         }
-        self.emit_event("response.output_item.added", json!({"type":"response.output_item.added","output_index":output_index,"item":item}))
+        Ok(())
     }
 
     fn emit_tool_arguments(&mut self, index: usize, part: &str) -> anyhow::Result<()> {
         if part.is_empty() {
             return Ok(());
         }
-        let entry = self.tool_calls.get(&index).cloned().unwrap_or_else(|| json!({}));
-        self.emit_event("response.function_call_arguments.delta", json!({"type":"response.function_call_arguments.delta","output_index":entry.get("output_index").cloned().unwrap_or(Value::Null),"item_id":entry.get("item_id").cloned().unwrap_or(Value::Null),"call_id":entry.get("id").cloned().unwrap_or(Value::Null),"delta":part}))
+        let Some(entry) = self.tool_calls.get(&index) else {
+            tracing::warn!(index, "cannot emit arguments for missing streaming tool call");
+            return Ok(());
+        };
+        if !entry.added {
+            tracing::warn!(index, "cannot emit arguments before streaming tool call start");
+            return Ok(());
+        }
+        let Some(output_index) = entry.output_index else {
+            tracing::warn!(index, "cannot emit arguments without output_index");
+            return Ok(());
+        };
+        self.emit_event("response.function_call_arguments.delta", json!({"type":"response.function_call_arguments.delta","output_index":output_index,"item_id":entry.item_id,"call_id":entry.call_id,"delta":part}))
     }
 
     fn allocate_output_index(&mut self) -> u32 {
