@@ -137,12 +137,36 @@ pub fn parse_chat_sse_bytes(buffer: &mut String, utf8_remainder: &mut Vec<u8>, b
     }
 
     let mut blocks = Vec::new();
-    while let Some(pos) = buffer.find("\n\n") {
+    while let Some((pos, delimiter_len)) = next_sse_block_delimiter(buffer) {
         let block = buffer[..pos].to_string();
-        buffer.drain(..pos + 2);
+        buffer.drain(..pos + delimiter_len);
         blocks.push(block);
     }
     blocks
+}
+
+fn next_sse_block_delimiter(buffer: &str) -> Option<(usize, usize)> {
+    let mut best: Option<(usize, usize)> = None;
+    for (delimiter, len) in [("\r\n\r\n", 4usize), ("\n\n", 2usize)] {
+        if let Some(pos) = buffer.find(delimiter) {
+            if best.is_none_or(|(best_pos, _)| pos < best_pos) {
+                best = Some((pos, len));
+            }
+        }
+    }
+    best
+}
+
+pub fn sse_event_from_block(block: &str) -> Option<String> {
+    for line in block.lines() {
+        if let Some(rest) = line.strip_prefix("event:") {
+            let event = rest.trim();
+            if !event.is_empty() {
+                return Some(event.to_string());
+            }
+        }
+    }
+    None
 }
 
 pub fn sse_data_from_block(block: &str) -> Option<String> {
@@ -218,6 +242,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_sse_crlf_block() {
+        let mut buf = String::new();
+        let mut remainder = Vec::new();
+        let bytes = b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\r\n\r\n";
+        let blocks = parse_chat_sse_bytes(&mut buf, &mut remainder, bytes);
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].contains("\"content\":\"hi\""));
+    }
+
+    #[test]
     fn parse_sse_multiple_blocks() {
         let mut buf = String::new();
         let mut remainder = Vec::new();
@@ -233,7 +267,7 @@ mod tests {
         let mut remainder = Vec::new();
 
         // First chunk: incomplete block (no \n\n terminator)
-        let blocks1 = parse_chat_sse_bytes(&mut buf, &mut remainder, b"data: {\"partial\":");
+        let blocks1 = parse_chat_sse_bytes(&mut buf, &mut remainder, b"data: {\"partial\":" );
         assert_eq!(blocks1.len(), 0);
 
         // Second chunk: completes the block
@@ -261,7 +295,19 @@ mod tests {
         assert!(blocks2[0].contains("你好"));
     }
 
-    // ── sse_data_from_block ──
+    // ── sse event/data parsing ──
+
+    #[test]
+    fn sse_event_single_line() {
+        let block = "event: error\ndata: {\"message\":\"bad\"}";
+        assert_eq!(sse_event_from_block(block).unwrap(), "error");
+    }
+
+    #[test]
+    fn sse_event_no_event_returns_none() {
+        let block = "data: {\"choices\":[{\"delta\":{}}]}";
+        assert!(sse_event_from_block(block).is_none());
+    }
 
     #[test]
     fn sse_data_single_line() {
