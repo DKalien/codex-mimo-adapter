@@ -4,6 +4,10 @@ use std::collections::{HashMap, HashSet};
 const CHAT_TOOL_NAME_MAX_LEN: usize = 64;
 const CUSTOM_TOOL_INPUT_FIELD: &str = "input";
 
+pub fn custom_tool_input_field() -> &'static str {
+    CUSTOM_TOOL_INPUT_FIELD
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolKind {
     Function,
@@ -25,16 +29,24 @@ pub struct ToolContext {
     pub chat_tools: Vec<Value>,
     pub reverse_names: HashMap<String, String>,
     specs_by_chat_name: HashMap<String, ToolSpec>,
+    namespace_name_to_chat_name: HashMap<(String, String), String>,
     used: HashSet<String>,
 }
 
 impl ToolContext {
     pub fn build(tools: Option<&Value>) -> Self {
+        Self::build_with_input(tools, None)
+    }
+
+    pub fn build_with_input(tools: Option<&Value>, input: Option<&Value>) -> Self {
         let mut context = Self::default();
         if let Some(Value::Array(items)) = tools {
             for item in items {
                 context.add_response_tool(item);
             }
+        }
+        if let Some(input) = input {
+            context.collect_tool_search_output_tools(input);
         }
         context
     }
@@ -54,6 +66,19 @@ impl ToolContext {
         self.specs_by_chat_name.get(chat_name)
     }
 
+    pub fn chat_name_for_response_function(&self, name: &str, namespace: Option<&str>) -> String {
+        if let Some(namespace) = namespace.filter(|value| !value.is_empty()) {
+            if let Some(chat_name) = self.namespace_name_to_chat_name.get(&(namespace.to_string(), name.to_string())) {
+                return chat_name.clone();
+            }
+            return format!("{namespace}__{name}").chars().take(CHAT_TOOL_NAME_MAX_LEN).collect();
+        }
+        self.reverse_names
+            .iter()
+            .find_map(|(safe, original)| (original == name).then_some(safe.clone()))
+            .unwrap_or_else(|| name.to_string())
+    }
+
     fn add_response_tool(&mut self, item: &Value) {
         if let Some(name) = item.as_str() {
             self.add_custom(&json!({"type":"custom","name":name}), ToolKind::Custom);
@@ -63,7 +88,7 @@ impl ToolContext {
         match obj.get("type").and_then(Value::as_str).unwrap_or("function") {
             "namespace" => self.add_namespace(item),
             "custom" => self.add_custom(item, ToolKind::Custom),
-            "tool_search" => self.add_custom(item, ToolKind::ToolSearch),
+            "tool_search" => self.add_custom(&json!({"type":"tool_search","name":"tool_search"}), ToolKind::ToolSearch),
             _ => self.add_function(tool_source(item).unwrap_or(item), None, None),
         }
     }
@@ -113,8 +138,11 @@ impl ToolContext {
             kind: if namespace.is_some() { ToolKind::Namespace } else { ToolKind::Function },
             name: source.get("name").and_then(Value::as_str).unwrap_or(&original).to_string(),
             chat_name: chat_name.clone(),
-            namespace,
+            namespace: namespace.clone(),
         };
+        if let Some(namespace) = namespace {
+            self.namespace_name_to_chat_name.insert((namespace, spec.name.clone()), chat_name.clone());
+        }
         self.add_chat_tool(original.as_str(), spec, parameters, source.get("description").and_then(Value::as_str).unwrap_or("").to_string());
     }
 
@@ -129,6 +157,29 @@ impl ToolContext {
                 "parameters": parameters,
             }
         }));
+    }
+
+    fn collect_tool_search_output_tools(&mut self, value: &Value) {
+        match value {
+            Value::Array(items) => {
+                for item in items {
+                    self.collect_tool_search_output_tools(item);
+                }
+            }
+            Value::Object(obj) => {
+                if obj.get("type").and_then(Value::as_str) == Some("tool_search_output") {
+                    if let Some(tools) = obj.get("tools").and_then(Value::as_array) {
+                        for tool in tools {
+                            self.add_response_tool(tool);
+                        }
+                    }
+                }
+                for value in obj.values() {
+                    self.collect_tool_search_output_tools(value);
+                }
+            }
+            _ => {}
+        }
     }
 
     fn safe_name(&mut self, original: &str) -> String {
