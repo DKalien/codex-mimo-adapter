@@ -38,7 +38,7 @@ async fn health() -> Json<Value> {
 
 async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(response) = authorize(&state.config, &headers) {
-        return response;
+        return *response;
     }
     match state.client.models().await {
         Ok(raw) => {
@@ -55,7 +55,7 @@ async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
 
 async fn responses(State(state): State<AppState>, headers: HeaderMap, body: String) -> Response {
     if let Err(response) = authorize(&state.config, &headers) {
-        return response;
+        return *response;
     }
     if body.is_empty() || body.len() > state.config.max_request_bytes {
         return error_response(StatusCode::PAYLOAD_TOO_LARGE, "request_too_large", "Invalid request size");
@@ -136,7 +136,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
             tool_ctx.reverse_names.clone(),
             Box::new(move |item| state_for_task.state.put(&item)),
             Box::new(move |event, data| {
-                let sse = axum::response::sse::Event::default().event(event.to_string()).data(data.to_string());
+                let sse = axum::response::sse::Event::default().event(event).data(data.to_string());
                 let _ = emit_tx.send(Ok(sse));
                 Ok(())
             }),
@@ -221,7 +221,7 @@ fn previous_response(state: &AppState, body: &Value) -> Result<Option<crate::sta
     }
 }
 
-fn authorize(config: &Config, headers: &HeaderMap) -> Result<(), Response> {
+fn authorize(config: &Config, headers: &HeaderMap) -> Result<(), Box<Response>> {
     let Some(token) = config.local_token.as_ref().filter(|token| !token.is_empty()) else {
         return Ok(());
     };
@@ -229,7 +229,7 @@ fn authorize(config: &Config, headers: &HeaderMap) -> Result<(), Response> {
     if headers.get("authorization").and_then(|v| v.to_str().ok()) == Some(expected.as_str()) {
         Ok(())
     } else {
-        Err(error_response(StatusCode::UNAUTHORIZED, "unauthorized", "Unauthorized"))
+        Err(Box::new(error_response(StatusCode::UNAUTHORIZED, "unauthorized", "Unauthorized")))
     }
 }
 

@@ -6,6 +6,9 @@ use uuid::Uuid;
 use super::text::{arguments_text, as_text};
 use super::tool_context::ToolContext;
 
+/// Return type for `build_chat_payload`: (payload, messages, reverse_names, tool_context).
+pub type ChatPayload = (Value, Vec<Value>, std::collections::HashMap<String, String>, ToolContext);
+
 #[derive(Debug, Error)]
 pub enum HistoryError {
     #[error("{0}")]
@@ -25,7 +28,7 @@ pub fn build_chat_payload(
     model_upstream: &str,
     previous: Option<&StoredResponse>,
     reasoning_parameter: Value,
-) -> Result<(Value, Vec<Value>, std::collections::HashMap<String, String>, ToolContext), HistoryError> {
+) -> Result<ChatPayload, HistoryError> {
     let (incoming, outputs) = extract_request(body)?;
     let mut messages = if !outputs.is_empty() {
         let previous = previous.ok_or_else(|| HistoryError::Invalid("tool output has no matching stored response".to_string()))?;

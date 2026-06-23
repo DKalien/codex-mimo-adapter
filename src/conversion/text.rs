@@ -89,7 +89,7 @@ fn extract_reasoning_details_text(value: &Value) -> Option<String> {
                     if let Some(nested) = part.get("parts").and_then(Value::as_array) {
                         let inner: String = nested
                             .iter()
-                            .filter_map(|p| extract_reasoning_detail_part_text(p))
+                            .filter_map(extract_reasoning_detail_part_text)
                             .collect::<Vec<_>>()
                             .join("\n\n");
                         if !inner.is_empty() {

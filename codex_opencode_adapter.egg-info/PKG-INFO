@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: codex-opencode-adapter
-Version: 0.1.0
-Summary: Thin OpenAI Responses API adapter for OpenCode Go
-Requires-Python: >=3.10
-License-File: NOTICE
-Provides-Extra: test
-Requires-Dist: pytest>=8; extra == "test"
-Dynamic: license-file

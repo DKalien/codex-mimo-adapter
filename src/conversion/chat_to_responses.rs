@@ -6,6 +6,7 @@ use super::responses_to_chat::repair_history;
 use super::text::{arguments_text, as_text, canonicalize_json_string_if_parseable, reasoning_text};
 use super::tool_context::ToolContext;
 
+#[allow(clippy::too_many_arguments)] // All params map 1:1 to distinct JSON fields.
 pub fn build_response<F>(
     body: &Value,
     chat_response: &Value,
@@ -131,6 +132,7 @@ pub fn completion_status(_content: &str, _pending: &[String], finish_reason: Opt
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Each param maps to a distinct JSON field in the response shell.
 pub fn response_shell(
     body: &Value,
     response_id: &str,
