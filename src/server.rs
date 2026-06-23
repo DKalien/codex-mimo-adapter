@@ -189,7 +189,10 @@ async fn stream_response(state: AppState, body: Value) -> Response {
                         }
                     }
                 }
-                if assembler.has_finish_reason() || assembler.has_substantive_output() {
+                if assembler.has_finish_reason() {
+                    let _ = assembler.finalize();
+                } else if assembler.has_substantive_output() {
+                    assembler.mark_truncated_as_length();
                     let _ = assembler.finalize();
                 } else {
                     let _ = assembler.fail("stream_truncated", "Upstream stream ended before sending finish_reason");

@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::responses_to_chat::repair_history;
-use super::text::{arguments_text, as_text, canonicalize_json_string_if_parseable, compact_json, reasoning_text};
+use super::text::{arguments_text, as_text, canonicalize_json_string_if_parseable, reasoning_text};
 use super::tool_context::{ToolContext, ToolKind};
 
 #[allow(clippy::too_many_arguments)] // All params map 1:1 to distinct JSON fields.
