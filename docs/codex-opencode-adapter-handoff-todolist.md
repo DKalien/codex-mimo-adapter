@@ -2,7 +2,7 @@
 
 > 用途：给新窗口 / 新执行上下文接手。  
 > 核心原则：**新窗口先对齐，不要马上执行。**  
-> 状态：P0-1 代码已初步实现；**尚未运行 `cargo test`，尚未做 OpenCode Go 实测**。
+> 状态：P0-1 代码已初步实现；用户本地执行 `cargo test` 通过；**尚未做 OpenCode Go 实测**。
 
 ---
 
@@ -546,9 +546,13 @@ TODO：
 
 验收：
 
-- [ ] `cargo test` 通过
+- [x] `cargo test` 通过
 - [ ] 新增测试能覆盖核心 tool_call 生命周期
 - [ ] 测试不依赖真实 OpenCode Go
+
+说明：
+
+- `cargo test` 通过来自用户本地验证。本轮尚未新增 P0-2 测试用例，因此只勾选整体测试命令通过，不勾选新增测试覆盖项。
 
 ---
 
@@ -781,6 +785,39 @@ docs/codex-opencode-adapter-handoff-todolist.md
 
 - 尚未运行 `cargo test`。
 - 尚未补 P0-2 测试用例。
+
+### 2026-06-23：用户本地 cargo test 通过
+
+状态：
+
+- 用户反馈本地执行 `cargo test` 已通过。
+- 已将该验证结果写入本文档。
+- 未新增测试用例，故 P0-2 的“新增测试覆盖核心 tool_call 生命周期”仍不打勾。
+
+改动文件：
+
+```txt
+docs/codex-opencode-adapter-handoff-todolist.md
+```
+
+验证：
+
+```txt
+cargo test
+```
+
+结果：
+
+```txt
+通过
+```
+
+还没做：
+
+- 尚未补 P0-2 专项测试用例。
+- 尚未做 OpenCode Go 真实接入测试。
+- 尚未处理 P0-3 stream 收口。
+- 尚未处理 P0-4 / P1 请求方向和 history 回链。
 
 ---
 
