@@ -2,7 +2,7 @@
 
 > 用途：给新窗口 / 新执行上下文接手。  
 > 核心原则：**新窗口先对齐，不要马上执行。**  
-> 状态：第一轮对齐已获用户确认；**尚未开始写 P0-1 代码，尚未完成 P0-1 实现，尚未运行测试**。
+> 状态：P0-1 代码已初步实现；**尚未运行 `cargo test`，尚未做 OpenCode Go 实测**。
 
 ---
 
@@ -197,32 +197,36 @@ src-tauri/src/proxy/providers/streaming.rs
 
 ### 6.1 复核目标仓库
 
-- [ ] 打开目标仓库 `HisenWeb/codex-opencode-adapter`
+- [x] 打开目标仓库 `HisenWeb/codex-opencode-adapter`
 - [ ] 确认当前分支和工作区状态
-- [ ] 打开 `src/conversion/stream_chat_to_responses.rs`
-- [ ] 确认当前 `StreamAssembler` 仍包含 `tool_calls: BTreeMap<usize, Value>`
-- [ ] 确认 `accept_tool_delta` 仍存在 `unwrap_or(0)` 或等价默认 index=0 行为
-- [ ] 确认 `ensure_tool_started` 当前 start 条件仍没有同时要求 `call_id + name`
-- [ ] 确认 `finalize()` 当前是否缺少开头 `terminal_emitted` 保护
+- [x] 打开 `src/conversion/stream_chat_to_responses.rs`
+- [x] 确认当前 `StreamAssembler` 仍包含 `tool_calls: BTreeMap<usize, Value>`
+- [x] 确认 `accept_tool_delta` 仍存在 `unwrap_or(0)` 或等价默认 index=0 行为
+- [x] 确认 `ensure_tool_started` 当前 start 条件仍没有同时要求 `call_id + name`
+- [x] 确认 `finalize()` 当前是否缺少开头 `terminal_emitted` 保护
+
+说明：
+
+- 已通过 GitHub 远程仓库复核默认分支内容；当前执行环境无法访问用户本机 `D:\AI-Tools\codex-opencode-adapter` 工作区，因此“当前分支和工作区状态”暂不打勾。
 
 ### 6.2 复核 cc-switch 参考行为
 
-- [ ] 打开 cc-switch 的 `streaming_codex_chat.rs`
-- [ ] 确认 cc-switch 按 `index -> ToolCallState` 绑定 tool_call
-- [ ] 确认 cc-switch 是 `call_id + name` 齐全后才 start
-- [ ] 确认 cc-switch arguments 是 append/cache，并在 start 后补发 pending delta
-- [ ] 确认 cc-switch finalize 会补齐 arguments done / output item done
-- [ ] 确认 cc-switch terminal event 有 completed/failed 幂等保护
+- [x] 打开 cc-switch 的 `streaming_codex_chat.rs`
+- [x] 确认 cc-switch 按 `index -> ToolCallState` 绑定 tool_call
+- [x] 确认 cc-switch 是 `call_id + name` 齐全后才 start
+- [x] 确认 cc-switch arguments 是 append/cache，并在 start 后补发 pending delta
+- [x] 确认 cc-switch finalize 会补齐 arguments done / output item done
+- [x] 确认 cc-switch terminal event 有 completed/failed 幂等保护
 
 ### 6.3 复核实现范围
 
-- [ ] 第一轮只做 P0-1
-- [ ] 第一轮优先只改 `src/conversion/stream_chat_to_responses.rs`
-- [ ] 不混入 P0-3 stream truncated 收口
-- [ ] 不混入 P1 request transform
-- [ ] 不混入 P2 non-stream response
-- [ ] 不做 provider 平台
-- [ ] 不做 OpenCode Go 实测
+- [x] 第一轮只做 P0-1
+- [x] 第一轮优先只改 `src/conversion/stream_chat_to_responses.rs`
+- [x] 不混入 P0-3 stream truncated 收口
+- [x] 不混入 P1 request transform
+- [x] 不混入 P2 non-stream response
+- [x] 不做 provider 平台
+- [x] 不做 OpenCode Go 实测
 
 ---
 
@@ -278,16 +282,16 @@ struct StreamingToolCall {
 
 TODO：
 
-- [ ] 新增 `StreamingToolCall` struct
-- [ ] 将 `tool_calls` 从 `BTreeMap<usize, Value>` 改为 `BTreeMap<usize, StreamingToolCall>`
-- [ ] 移除 tool_call 内部用 `serde_json::Value` 存状态的写法
-- [ ] 保留 `BTreeMap`，确保 finalize 顺序 deterministic
+- [x] 新增 `StreamingToolCall` struct
+- [x] 将 `tool_calls` 从 `BTreeMap<usize, Value>` 改为 `BTreeMap<usize, StreamingToolCall>`
+- [x] 移除 tool_call 内部用 `serde_json::Value` 存状态的写法
+- [x] 保留 `BTreeMap`，确保 finalize 顺序 deterministic
 
 验收：
 
-- [ ] 每个 tool_call 的状态字段可直接读写
-- [ ] 不再依赖 JSON path 读写内部状态
-- [ ] finalize 时遍历顺序稳定
+- [x] 每个 tool_call 的状态字段可直接读写
+- [x] 不再依赖 JSON path 读写内部状态
+- [x] finalize 时遍历顺序稳定
 
 ---
 
@@ -307,17 +311,17 @@ unwrap_or(0)
 
 TODO：
 
-- [ ] `index` 必须存在
-- [ ] 缺失 index 时不再默认归到 0
-- [ ] 缺失 index 的 delta 不参与 merge
-- [ ] 缺失 index 时记录 warning
-- [ ] 不污染 index=0
+- [x] `index` 必须存在
+- [x] 缺失 index 时不再默认归到 0
+- [x] 缺失 index 的 delta 不参与 merge
+- [x] 缺失 index 时记录 warning
+- [x] 不污染 index=0
 
 验收：
 
 - [ ] 多 tool_call 交错时不会串线
-- [ ] 缺失 index 不会污染 index=0
-- [ ] `index -> tool state` 是唯一归属锚点
+- [x] 缺失 index 不会污染 index=0
+- [x] `index -> tool state` 是唯一归属锚点
 
 ---
 
@@ -334,18 +338,18 @@ TODO：
 
 TODO：
 
-- [ ] 新 state 的 `call_id` 初始为空
-- [ ] delta 带 id 时写入 `call_id`
-- [ ] 未 added 前允许更新 `call_id`
-- [ ] added 后收到不同 id 时 warning，不覆盖
-- [ ] finalize 时缺失 `call_id` fallback 为 `call_{index}`
-- [ ] 删除随机 UUID call_id fallback
+- [x] 新 state 的 `call_id` 初始为空
+- [x] delta 带 id 时写入 `call_id`
+- [x] 未 added 前允许更新 `call_id`
+- [x] added 后收到不同 id 时 warning，不覆盖
+- [x] finalize 时缺失 `call_id` fallback 为 `call_{index}`
+- [x] 删除随机 UUID call_id fallback
 
 验收：
 
-- [ ] 同一 index 的 call_id 生命周期稳定
-- [ ] start 后 call_id 不再变化
-- [ ] final output / pending_call_ids / replay tool_calls 使用同一 call_id
+- [x] 同一 index 的 call_id 生命周期稳定
+- [x] start 后 call_id 不再变化
+- [x] final output / pending_call_ids / replay tool_calls 使用同一 call_id
 
 ---
 
@@ -360,16 +364,16 @@ TODO：
 
 TODO：
 
-- [ ] name delta 改为覆盖
-- [ ] name 为空时不覆盖
-- [ ] added 后不再改 name
-- [ ] added 后收到不同 name 时记录 warning
+- [x] name delta 改为覆盖
+- [x] name 为空时不覆盖
+- [x] added 后不再改 name
+- [x] added 后收到不同 name 时记录 warning
 
 验收：
 
-- [ ] name 不会被拼接坏
-- [ ] name 一旦用于 start 就保持稳定
-- [ ] 不生成错误工具名
+- [x] name 不会被拼接坏
+- [x] name 一旦用于 start 就保持稳定
+- [x] 不生成错误工具名
 
 ---
 
@@ -383,20 +387,20 @@ TODO：
 
 TODO：
 
-- [ ] 修改 `ensure_tool_started(index)`
-- [ ] id 未到时不 start
-- [ ] name 未到时不 start
-- [ ] start 前 finish text item
-- [ ] start 前 finish reasoning item
-- [ ] 分配 `output_index`
-- [ ] 设置 `added = true`
-- [ ] 发 `response.output_item.added`
+- [x] 修改 `ensure_tool_started(index)`
+- [x] id 未到时不 start
+- [x] name 未到时不 start
+- [x] start 前 finish text item
+- [x] start 前 finish reasoning item
+- [x] 分配 `output_index`
+- [x] 设置 `added = true`
+- [x] 发 `response.output_item.added`
 
 验收：
 
-- [ ] start 时 call_id/name 都是稳定值
-- [ ] start 后 item 状态为 `in_progress`
-- [ ] 不会提前生成不完整 function_call item
+- [x] start 时 call_id/name 都是稳定值
+- [x] start 后 item 状态为 `in_progress`
+- [x] 不会提前生成不完整 function_call item
 
 ---
 
@@ -412,18 +416,18 @@ TODO：
 
 TODO：
 
-- [ ] arguments delta append 到 `state.arguments`
-- [ ] added=true 时立即发 arguments delta
-- [ ] added=false 时缓存 arguments
-- [ ] start 后补发 pending arguments
-- [ ] 防止重复补发
+- [x] arguments delta append 到 `state.arguments`
+- [x] added=true 时立即发 arguments delta
+- [x] added=false 时缓存 arguments
+- [x] start 后补发 pending arguments
+- [x] 防止重复补发
 
 验收：
 
-- [ ] arguments 先到不会丢
-- [ ] id/name 后到时 start 后立刻补发 pending arguments
+- [x] arguments 先到不会丢
+- [x] id/name 后到时 start 后立刻补发 pending arguments
 - [ ] final done arguments 与 delta 累计一致
-- [ ] 不重复发同一段 arguments
+- [x] 不重复发同一段 arguments
 
 ---
 
@@ -431,25 +435,25 @@ TODO：
 
 TODO：
 
-- [ ] finalize 遍历 `BTreeMap<usize, StreamingToolCall>`
-- [ ] 已 done 的跳过
-- [ ] name 缺失的 tool_call 跳过并 warning
-- [ ] call_id 缺失时 fallback 为 `call_{index}`
-- [ ] 未 added 但 name 有效时，finalize 阶段补发 `response.output_item.added`
-- [ ] arguments 用 `canonicalize_json_string_if_parseable`
-- [ ] 发 `response.function_call_arguments.done`
-- [ ] 发 `response.output_item.done`
-- [ ] 设置 `done = true`
-- [ ] 加入 final response output
-- [ ] 加入 stored assistant.tool_calls replay
-- [ ] 加入 pending_call_ids
+- [x] finalize 遍历 `BTreeMap<usize, StreamingToolCall>`
+- [x] 已 done 的跳过
+- [x] name 缺失的 tool_call 跳过并 warning
+- [x] call_id 缺失时 fallback 为 `call_{index}`
+- [x] 未 added 但 name 有效时，finalize 阶段补发 `response.output_item.added`
+- [x] arguments 用 `canonicalize_json_string_if_parseable`
+- [x] 发 `response.function_call_arguments.done`
+- [x] 发 `response.output_item.done`
+- [x] 设置 `done = true`
+- [x] 加入 final response output
+- [x] 加入 stored assistant.tool_calls replay
+- [x] 加入 pending_call_ids
 
 验收：
 
-- [ ] done 只发一次
-- [ ] final output 中 function_call 完整
-- [ ] pending_call_ids 与 function_call.call_id 一致
-- [ ] stored history 可被下一轮 function_call_output 正确接上
+- [x] done 只发一次
+- [x] final output 中 function_call 完整
+- [x] pending_call_ids 与 function_call.call_id 一致
+- [x] stored history 可被下一轮 function_call_output 正确接上
 
 ---
 
@@ -465,10 +469,10 @@ if self.terminal_emitted {
 
 TODO：
 
-- [ ] finalize 开头增加 `terminal_emitted` 检查
-- [ ] `response.completed` 只发一次
-- [ ] `response.incomplete` 只发一次
-- [ ] `response.failed` 只发一次
+- [x] finalize 开头增加 `terminal_emitted` 检查
+- [x] `response.completed` 只发一次
+- [x] `response.incomplete` 只发一次
+- [x] `response.failed` 只发一次
 - [ ] `[DONE]` 后不再被自然结束重复 finalize
 
 验收：
@@ -693,6 +697,67 @@ docs/codex-opencode-adapter-handoff-todolist.md
 - 尚未复核 cc-switch 参考文件。
 - 尚未实现 P0-1。
 - 尚未补测试或运行 `cargo test`。
+
+### 2026-06-23：开工复核完成
+
+状态：
+
+- 已复核 GitHub 远程仓库 `HisenWeb/codex-opencode-adapter` 默认分支。
+- 已复核 `src/conversion/stream_chat_to_responses.rs`。
+- 已复核 cc-switch 的 `streaming_codex_chat.rs`、`transform_codex_chat.rs`、`streaming.rs`。
+- 确认当前 P0-1 风险点仍存在：`BTreeMap<usize, Value>`、缺失 index 默认归 0、name append、start 未同时要求 `call_id + name`、`finalize()` 开头缺少 terminal 幂等保护。
+- 本地 Windows 工作区状态无法在当前执行环境读取，故未勾选“确认当前分支和工作区状态”。
+
+改动文件：
+
+```txt
+docs/codex-opencode-adapter-handoff-todolist.md
+```
+
+验证：
+
+- 通过 GitHub 读取目标仓库源码。
+- 通过 GitHub 读取 cc-switch 参考源码。
+
+还没做：
+
+- 尚未运行 `cargo test`。
+- 尚未做 OpenCode Go 实测。
+- 尚未执行 P0-2 测试补齐。
+
+### 2026-06-23：P0-1 streaming tool_call 生命周期初步实现
+
+状态：
+
+- 已在 `src/conversion/stream_chat_to_responses.rs` 引入显式 `StreamingToolCall` 状态。
+- 已将 tool_call 状态从 `BTreeMap<usize, Value>` 替换为 `BTreeMap<usize, StreamingToolCall>`。
+- 已移除缺失 index 默认归 0 的行为，改为 warning 后忽略。
+- 已实现 `call_id + name` 齐全后才 start。
+- 已实现 arguments append/cache，start 后补发 pending arguments，start 后增量立即转发。
+- 已实现 finalize 阶段补齐 function_call arguments done / output item done / final output / replay tool_calls / pending_call_ids。
+- 已给 finalize 开头增加 terminal 幂等保护。
+- 已做一次静态复查并修正 `emit_tool_arguments` 中从借用状态移动 `String` 的风险。
+
+改动文件：
+
+```txt
+src/conversion/stream_chat_to_responses.rs
+docs/codex-opencode-adapter-handoff-todolist.md
+```
+
+验证：
+
+- 已通过源码复查确认 P0-1 关键逻辑落在目标文件内。
+- 已复查 `emit_tool_arguments` 的 `item_id` / `call_id` 使用 clone，避免从借用状态移动 `String`。
+- 当前执行环境无法 clone GitHub 仓库：`Could not resolve host: github.com`，因此尚未运行 `cargo test`。
+
+还没做：
+
+- 尚未运行 `cargo test`。
+- 尚未补 P0-2 测试用例。
+- 尚未做 OpenCode Go 真实接入测试。
+- 尚未处理 P0-3 stream 收口。
+- 尚未处理 P0-4 / P1 请求方向和 history 回链。
 
 ---
 
