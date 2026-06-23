@@ -1,3 +1,4 @@
+NOTICE
 README.md
 pyproject.toml
 codex_opencode_adapter/__init__.py
@@ -14,7 +15,15 @@ codex_opencode_adapter.egg-info/dependency_links.txt
 codex_opencode_adapter.egg-info/entry_points.txt
 codex_opencode_adapter.egg-info/requires.txt
 codex_opencode_adapter.egg-info/top_level.txt
+codex_opencode_adapter/conversion/__init__.py
+codex_opencode_adapter/conversion/chat_to_responses.py
+codex_opencode_adapter/conversion/ids.py
+codex_opencode_adapter/conversion/responses_to_chat.py
+codex_opencode_adapter/conversion/stream_chat_to_responses.py
+codex_opencode_adapter/conversion/text.py
+codex_opencode_adapter/conversion/tool_context.py
 tests/test_adapter.py
+tests/test_conversion_modules.py
 tests/test_models.py
 tests/test_protocol.py
 tests/test_server.py

@@ -25,7 +25,7 @@ pub fn build_chat_payload(
     model_upstream: &str,
     previous: Option<&StoredResponse>,
     reasoning_parameter: Value,
-) -> Result<(Value, Vec<Value>, std::collections::HashMap<String, String>), HistoryError> {
+) -> Result<(Value, Vec<Value>, std::collections::HashMap<String, String>, ToolContext), HistoryError> {
     let (incoming, outputs) = extract_request(body)?;
     let mut messages = if !outputs.is_empty() {
         let previous = previous.ok_or_else(|| HistoryError::Invalid("tool output has no matching stored response".to_string()))?;
@@ -61,13 +61,21 @@ pub fn build_chat_payload(
     for (source, target) in [
         ("temperature", "temperature"),
         ("top_p", "top_p"),
-        ("max_output_tokens", "max_tokens"),
+        ("max_output_tokens", "max_completion_tokens"),
         ("max_tokens", "max_tokens"),
+        ("max_completion_tokens", "max_completion_tokens"),
         ("presence_penalty", "presence_penalty"),
         ("frequency_penalty", "frequency_penalty"),
         ("response_format", "response_format"),
         ("seed", "seed"),
         ("stop", "stop"),
+        ("logit_bias", "logit_bias"),
+        ("logprobs", "logprobs"),
+        ("metadata", "metadata"),
+        ("n", "n"),
+        ("service_tier", "service_tier"),
+        ("top_logprobs", "top_logprobs"),
+        ("user", "user"),
     ] {
         if let Some(value) = body.get(source) {
             payload[target] = value.clone();
@@ -75,7 +83,15 @@ pub fn build_chat_payload(
     }
 
     if payload.get("stream").and_then(Value::as_bool).unwrap_or(false) {
-        payload["stream_options"] = json!({"include_usage": true});
+        // Merge include_usage into existing stream_options (don't overwrite other fields)
+        let stream_opts = payload.get("stream_options").cloned().unwrap_or_else(|| json!({}));
+        if let Some(obj) = stream_opts.as_object() {
+            let mut merged = obj.clone();
+            merged.insert("include_usage".to_string(), json!(true));
+            payload["stream_options"] = Value::Object(merged);
+        } else {
+            payload["stream_options"] = json!({"include_usage": true});
+        }
     }
     if let Some(obj) = reasoning_parameter.as_object() {
         for (key, value) in obj {
@@ -83,7 +99,7 @@ pub fn build_chat_payload(
         }
     }
 
-    Ok((payload, messages, context.reverse_names))
+    Ok((payload, messages, context.reverse_names.clone(), context))
 }
 
 pub fn extract_request(body: &Value) -> Result<(Vec<Value>, Vec<Value>), HistoryError> {
@@ -121,10 +137,10 @@ pub fn extract_request(body: &Value) -> Result<(Vec<Value>, Vec<Value>), History
         let Some(obj) = item.as_object() else { continue; };
         let kind = obj.get("type").and_then(Value::as_str).unwrap_or("");
         match kind {
-            "function_call_output" => {
+            "function_call_output" | "custom_tool_call_output" | "tool_search_output" => {
                 let call_id = obj.get("call_id").and_then(Value::as_str).unwrap_or("");
                 if call_id.is_empty() {
-                    return Err(HistoryError::Invalid("function_call_output requires call_id".to_string()));
+                    return Err(HistoryError::Invalid(format!("{kind} requires call_id")));
                 }
                 flush_pending(&mut messages, &mut pending_calls);
                 let empty = Value::String(String::new());
@@ -134,7 +150,7 @@ pub fn extract_request(body: &Value) -> Result<(Vec<Value>, Vec<Value>), History
                     "content":as_text(obj.get("output").unwrap_or(&empty)),
                 }));
             }
-            "function_call" => {
+            "function_call" | "custom_tool_call" | "tool_search_call" => {
                 pending_calls.push(json!({
                     "id": obj.get("call_id").or_else(|| obj.get("id")).and_then(Value::as_str).map(ToString::to_string).unwrap_or_else(|| format!("call_{}", Uuid::new_v4().simple())),
                     "type":"function",
@@ -144,7 +160,15 @@ pub fn extract_request(body: &Value) -> Result<(Vec<Value>, Vec<Value>), History
                     }
                 }));
             }
-            "reasoning" | "summary" => {}
+            "reasoning" | "summary" => {
+                // Preserve reasoning items as assistant reasoning_content in history
+                if let Some(summary_text) = obj.get("summary").and_then(Value::as_array).and_then(|a| a.first()).and_then(|s| s.get("text")).and_then(Value::as_str) {
+                    if !summary_text.is_empty() {
+                        flush_pending(&mut messages, &mut pending_calls);
+                        messages.push(json!({"role":"assistant","reasoning_content":summary_text,"content":""}));
+                    }
+                }
+            }
             "message" | "" => {
                 flush_pending(&mut messages, &mut pending_calls);
                 let mut role = obj.get("role").and_then(Value::as_str).unwrap_or("user").to_string();
@@ -156,6 +180,22 @@ pub fn extract_request(body: &Value) -> Result<(Vec<Value>, Vec<Value>), History
             "input_text" | "output_text" | "text" => {
                 flush_pending(&mut messages, &mut pending_calls);
                 messages.push(json!({"role":"user","content":as_text(&Value::Object(obj.clone()))}));
+            }
+            "input_image" => {
+                flush_pending(&mut messages, &mut pending_calls);
+                let image_url = obj.get("image_url").cloned().unwrap_or_else(|| {
+                    obj.get("url").and_then(Value::as_str).map(|u| json!(u)).unwrap_or(Value::Null)
+                });
+                let image_url = if image_url.is_object() { image_url } else { json!({"url": image_url}) };
+                messages.push(json!({"role":"user","content":[{"type":"image_url","image_url":image_url}]}));
+            }
+            "input_file" => {
+                flush_pending(&mut messages, &mut pending_calls);
+                messages.push(json!({"role":"user","content":[{"type":"file","file":obj.get("file").cloned().unwrap_or_else(|| Value::Object(obj.clone()))}]}));
+            }
+            "input_audio" => {
+                flush_pending(&mut messages, &mut pending_calls);
+                messages.push(json!({"role":"user","content":[{"type":"input_audio","input_audio":obj.get("input_audio").cloned().unwrap_or_else(|| Value::Object(obj.clone()))}]}));
             }
             _ => {}
         }

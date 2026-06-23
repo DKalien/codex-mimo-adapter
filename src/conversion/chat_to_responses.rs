@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use super::responses_to_chat::repair_history;
 use super::text::{arguments_text, as_text, canonicalize_json_string_if_parseable, reasoning_text};
+use super::tool_context::ToolContext;
 
 pub fn build_response<F>(
     body: &Value,
@@ -11,7 +12,7 @@ pub fn build_response<F>(
     model_alias: &str,
     model_upstream: &str,
     base_messages: &[Value],
-    reverse_names: &std::collections::HashMap<String, String>,
+    context: &ToolContext,
     mut state_put: F,
 ) -> anyhow::Result<Value>
 where
@@ -55,14 +56,31 @@ where
             let arguments = canonicalize_json_string_if_parseable(&arguments_text(function.get("arguments").or_else(|| call.get("arguments"))));
             replay_calls.push(json!({"id":call_id,"type":"function","function":{"name":raw_name,"arguments":arguments}}));
             pending.push(call_id.clone());
-            output.push(json!({
-                "type":"function_call",
-                "id":format!("fc_{}", Uuid::new_v4().simple()),
-                "call_id":call_id,
-                "name":reverse_names.get(raw_name).cloned().unwrap_or_else(|| raw_name.to_string()),
-                "arguments":arguments,
-                "status":"completed"
-            }));
+
+            let restored_name = context.restore_name(raw_name);
+            let spec = context.lookup_spec(raw_name);
+            let item_type = match spec.as_ref().map(|s| &s.kind) {
+                Some(super::tool_context::ToolKind::Custom) => "custom_tool_call",
+                Some(super::tool_context::ToolKind::ToolSearch) => "tool_search_call",
+                _ => "function_call",
+            };
+            let mut item = json!({
+                "type": item_type,
+                "id": format!("fc_{}", Uuid::new_v4().simple()),
+                "call_id": call_id,
+                "name": restored_name,
+                "arguments": arguments,
+                "status": "completed"
+            });
+            // Attach namespace if present
+            if let Some(ns) = spec.and_then(|s| s.namespace.as_deref()).filter(|n| !n.is_empty()) {
+                item["namespace"] = Value::String(ns.to_string());
+            }
+            // Attach reasoning content to tool items
+            if !reasoning.is_empty() {
+                item["reasoning_content"] = Value::String(reasoning.clone());
+            }
+            output.push(item);
         }
     }
     if !replay_calls.is_empty() {

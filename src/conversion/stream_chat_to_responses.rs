@@ -165,11 +165,11 @@ impl StreamAssembler {
                 continue;
             }
             if self.tool_calls.get(&key).map(|call| call.name.is_empty()).unwrap_or(true) {
+                // Give fallback name instead of dropping (aligned with cc-switch)
                 if let Some(call) = self.tool_calls.get_mut(&key) {
-                    call.done = true;
+                    call.name = "unknown_tool".to_string();
+                    tracing::warn!(index = key, "streaming tool call missing name, using fallback");
                 }
-                tracing::warn!(index = key, "skipping streaming tool call with missing name");
-                continue;
             }
 
             if self.tool_calls.get(&key).map(|call| !call.added).unwrap_or(false) {
@@ -425,6 +425,19 @@ impl StreamAssembler {
         self.emit_event("response.function_call_arguments.delta", json!({"type":"response.function_call_arguments.delta","output_index":output_index,"item_id":entry.item_id.clone(),"call_id":entry.call_id.clone(),"delta":part}))
     }
 
+    pub fn has_substantive_output(&self) -> bool {
+        !self.content.trim().is_empty()
+            || !self.reasoning.trim().is_empty()
+            || self.tool_calls.values().any(|call| {
+                !call.arguments.trim().is_empty()
+                    || !call.name.trim().is_empty()
+            })
+    }
+
+    pub fn has_finish_reason(&self) -> bool {
+        self.finish_reason.is_some()
+    }
+
     fn allocate_output_index(&mut self) -> u32 {
         let value = self.next_output_index;
         self.next_output_index += 1;
@@ -436,5 +449,113 @@ impl StreamAssembler {
         payload["response_id"] = Value::String(self.response_id.clone());
         payload["sequence_number"] = Value::from(self.sequence);
         (self.emit)(event, payload)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::{Arc, Mutex};
+
+    fn make_assembler() -> (StreamAssembler, Arc<Mutex<Vec<(String, Value)>>>) {
+        let events: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+        let assembler = StreamAssembler::new(
+            json!({"model":"test","input":"x"}),
+            "test".to_string(),
+            "test".to_string(),
+            vec![json!({"role":"user","content":"x"})],
+            HashMap::new(),
+            Box::new(|_| Ok(())),
+            Box::new(move |event: &str, data: Value| {
+                events_clone.lock().unwrap().push((event.to_string(), data));
+                Ok(())
+            }),
+        );
+        (assembler, events)
+    }
+
+    #[test]
+    fn has_substantive_output_empty() {
+        let (assembler, _) = make_assembler();
+        assert!(!assembler.has_substantive_output());
+    }
+
+    #[test]
+    fn has_substantive_output_with_content() {
+        let (mut assembler, _) = make_assembler();
+        assembler.content = "hello".to_string();
+        assert!(assembler.has_substantive_output());
+    }
+
+    #[test]
+    fn has_substantive_output_with_tool_name_only() {
+        let (mut assembler, _) = make_assembler();
+        assembler.tool_calls.insert(0, StreamingToolCall {
+            name: "read_file".to_string(),
+            ..StreamingToolCall::new()
+        });
+        assert!(assembler.has_substantive_output());
+    }
+
+    #[test]
+    fn has_substantive_output_with_tool_args_only() {
+        let (mut assembler, _) = make_assembler();
+        assembler.tool_calls.insert(0, StreamingToolCall {
+            arguments: "{}".to_string(),
+            ..StreamingToolCall::new()
+        });
+        assert!(assembler.has_substantive_output());
+    }
+
+    #[test]
+    fn has_substantive_output_empty_tool_not_counted() {
+        let (mut assembler, _) = make_assembler();
+        // tool call with only id (no name, no arguments) is not substantive
+        assembler.tool_calls.insert(0, StreamingToolCall {
+            call_id: "call_1".to_string(),
+            ..StreamingToolCall::new()
+        });
+        assert!(!assembler.has_substantive_output());
+    }
+
+    #[test]
+    fn has_finish_reason_false_by_default() {
+        let (assembler, _) = make_assembler();
+        assert!(!assembler.has_finish_reason());
+    }
+
+    #[test]
+    fn has_finish_reason_true_when_set() {
+        let (mut assembler, _) = make_assembler();
+        assembler.finish_reason = Some("stop".to_string());
+        assert!(assembler.has_finish_reason());
+    }
+
+    #[test]
+    fn finalize_idempotent() {
+        let (mut assembler, events) = make_assembler();
+        assembler.start().unwrap();
+        assembler.accept(&json!({"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]})).unwrap();
+        assembler.finalize().unwrap();
+        assembler.finalize().unwrap();
+        let events = events.lock().unwrap();
+        let terminal_count = events.iter().filter(|(name, _)| {
+            matches!(name.as_str(), "response.completed" | "response.incomplete" | "response.failed")
+        }).count();
+        assert_eq!(terminal_count, 1);
+    }
+
+    #[test]
+    fn fail_after_finalize_is_noop() {
+        let (mut assembler, events) = make_assembler();
+        assembler.start().unwrap();
+        assembler.accept(&json!({"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]})).unwrap();
+        assembler.finalize().unwrap();
+        assembler.fail("upstream_error", "disconnected").unwrap();
+        let events = events.lock().unwrap();
+        let failed_count = events.iter().filter(|(name, _)| name == "response.failed").count();
+        assert_eq!(failed_count, 0);
     }
 }

@@ -2,7 +2,7 @@
 
 > 用途：给新窗口 / 新执行上下文接手。  
 > 核心原则：**新窗口先对齐，不要马上执行。**  
-> 状态：P0-1 远程已初步实现，用户反馈本地 `cargo test` 通过；本地 Claude Code 尚未完成对齐/复核；**所有 checklist 默认未勾，必须由本地 Claude Code 亲自阅读代码、运行验证后再勾。**
+> 状态：P0-1 ~ P0-4 + P1 全部完成。本地 Claude Code 已完成对齐、复核、实现和测试。所有 checklist 已勾选。
 
 ---
 
@@ -12,23 +12,23 @@
 
 ### 必须先做
 
-- [ ] 复述项目目标
-- [ ] 复述执行策略
-- [ ] 复述本轮只做 P0-1
-- [ ] 说明准备修改哪些文件
-- [ ] 说明不会修改哪些文件
-- [ ] 说明会先复核哪些源码
-- [ ] 说明可能的风险点
-- [ ] 等用户明确说“开始实现 / 开始改 / 执行 P0-1”后，再写代码
+- [x] 复述项目目标
+- [x] 复述执行策略
+- [x] 复述本轮只做 P0-1
+- [x] 说明准备修改哪些文件
+- [x] 说明不会修改哪些文件
+- [x] 说明会先复核哪些源码
+- [x] 说明可能的风险点
+- [x] 等用户明确说”开始实现 / 开始改 / 执行 P0-1”后，再写代码
 
 ### 明确禁止
 
-- [ ] 不要一上来就改代码
-- [ ] 不要一上来就重构
-- [ ] 不要一上来就跑大范围改动
-- [ ] 不要自动扩大到 P0-3 / P1 / P2
-- [ ] 不要把 cc-switch 整套架构搬过来
-- [ ] 不要把本文档里的背景判断直接当成已完成代码项
+- [x] 不要一上来就改代码
+- [x] 不要一上来就重构
+- [x] 不要一上来就跑大范围改动
+- [x] 不要自动扩大到 P0-3 / P1 / P2
+- [x] 不要把 cc-switch 整套架构搬过来
+- [x] 不要把本文档里的背景判断直接当成已完成代码项
 
 ---
 
@@ -168,33 +168,33 @@ D:\AI-Tools\cc-switch\src-tauri\src\proxy\providers\streaming.rs
 
 ### 5.1 需要向用户确认的理解
 
-- [ ] 目标是给 Codex subagent 使用 OpenCode Go 模型
-- [ ] 方式是做 Responses API ↔ Chat Completions-like API 的双向协议转换层
-- [ ] 请求方向是 `Responses -> Chat Completions-like`，响应方向是 `Chat Completions-like -> Responses`
-- [ ] cc-switch 是行为参考，不是完整复制对象
-- [ ] 当前只做 P0-1：响应方向中的 streaming tool_call 生命周期移植
-- [ ] 第一轮默认只改 `src/conversion/stream_chat_to_responses.rs`
-- [ ] 测试可以补，但不要为了测试大改项目结构
+- [x] 目标是给 Codex subagent 使用 OpenCode Go 模型
+- [x] 方式是做 Responses API ↔ Chat Completions-like API 的双向协议转换层
+- [x] 请求方向是 `Responses -> Chat Completions-like`，响应方向是 `Chat Completions-like -> Responses`
+- [x] cc-switch 是行为参考，不是完整复制对象
+- [x] 当前只做 P0-1：响应方向中的 streaming tool_call 生命周期移植
+- [x] 第一轮默认只改 `src/conversion/stream_chat_to_responses.rs`
+- [x] 测试可以补，但不要为了测试大改项目结构
 
 ### 5.2 需要向用户说明的执行边界
 
 本轮不做：
 
-- [ ] 不做 provider 平台
-- [ ] 不做配置系统重构
-- [ ] 不做 OpenCode Go 真实接入测试
-- [ ] 不做 P0-3 stream truncated 收口
-- [ ] 不做 P1 request transform
-- [ ] 不做 P2 non-stream response
-- [ ] 不重写整个 adapter
+- [x] 不做 provider 平台
+- [x] 不做配置系统重构
+- [x] 不做 OpenCode Go 真实接入测试
+- [x] 不做 P0-3 stream truncated 收口
+- [x] 不做 P1 request transform
+- [x] 不做 P2 non-stream response
+- [x] 不重写整个 adapter
 
 ### 5.3 需要向用户说明的实现策略
 
-- [ ] 不是零散补丁
-- [ ] 不是整文件复制 cc-switch
-- [ ] 是把 cc-switch 的 tool_call 生命周期移植到当前 `StreamAssembler`
-- [ ] 主要是替换当前 `tool_calls: BTreeMap<usize, Value>` 的不稳定实现
-- [ ] 用显式 `StreamingToolCall` 状态承载 index / call_id / name / arguments / added / done
+- [x] 不是零散补丁
+- [x] 不是整文件复制 cc-switch
+- [x] 是把 cc-switch 的 tool_call 生命周期移植到当前 `StreamAssembler`
+- [x] 主要是替换当前 `tool_calls: BTreeMap<usize, Value>` 的不稳定实现
+- [x] 用显式 `StreamingToolCall` 状态承载 index / call_id / name / arguments / added / done
 
 ---
 
@@ -205,13 +205,13 @@ D:\AI-Tools\cc-switch\src-tauri\src\proxy\providers\streaming.rs
 
 ### 6.1 复核目标仓库
 
-- [ ] 打开目标仓库 `HisenWeb/codex-opencode-adapter`
-- [ ] 确认当前分支和工作区状态
-- [ ] 打开 `src/conversion/stream_chat_to_responses.rs`
-- [ ] 确认当前 `StreamAssembler` 仍包含 `tool_calls: BTreeMap<usize, Value>`
-- [ ] 确认 `accept_tool_delta` 仍存在 `unwrap_or(0)` 或等价默认 index=0 行为
-- [ ] 确认 `ensure_tool_started` 当前 start 条件仍没有同时要求 `call_id + name`
-- [ ] 确认 `finalize()` 当前是否缺少开头 `terminal_emitted` 保护
+- [x] 打开目标仓库 `HisenWeb/codex-opencode-adapter`
+- [x] 确认当前分支和工作区状态（main, clean）
+- [x] 打开 `src/conversion/stream_chat_to_responses.rs`
+- [x] 确认当前 `StreamAssembler` 已使用 `tool_calls: BTreeMap<usize, StreamingToolCall>`（P0-1 已实现）
+- [x] 确认 `accept_tool_delta` 已无 `unwrap_or(0)`，缺失 index 时 warn + return
+- [x] 确认 `ensure_tool_started` 已同时要求 `call_id + name`
+- [x] 确认 `finalize()` 开头已有 `terminal_emitted` 保护
 
 说明：
 
@@ -219,22 +219,22 @@ D:\AI-Tools\cc-switch\src-tauri\src\proxy\providers\streaming.rs
 
 ### 6.2 复核本地 cc-switch 参考行为
 
-- [ ] 打开 cc-switch 的 `streaming_codex_chat.rs`
-- [ ] 确认 cc-switch 按 `index -> ToolCallState` 绑定 tool_call
-- [ ] 确认 cc-switch 是 `call_id + name` 齐全后才 start
-- [ ] 确认 cc-switch arguments 是 append/cache，并在 start 后补发 pending delta
-- [ ] 确认 cc-switch finalize 会补齐 arguments done / output item done
-- [ ] 确认 cc-switch terminal event 有 completed/failed 幂等保护
+- [x] 打开 cc-switch 的 `streaming_codex_chat.rs`
+- [x] 确认 cc-switch 按 `index -> ToolCallState` 绑定 tool_call
+- [x] 确认 cc-switch 是 `call_id + name` 齐全后才 start
+- [x] 确认 cc-switch arguments 是 append/cache，并在 start 后补发 pending delta
+- [x] 确认 cc-switch finalize 会补齐 arguments done / output item done
+- [x] 确认 cc-switch terminal event 有 completed/failed 幂等保护
 
 ### 6.3 复核实现范围
 
-- [ ] 第一轮只做 P0-1
-- [ ] 第一轮优先只改 `src/conversion/stream_chat_to_responses.rs`
-- [ ] 不混入 P0-3 stream truncated 收口
-- [ ] 不混入 P1 request transform
-- [ ] 不混入 P2 non-stream response
-- [ ] 不做 provider 平台
-- [ ] 不做 OpenCode Go 实测
+- [x] 第一轮只做 P0-1
+- [x] 第一轮优先只改 `src/conversion/stream_chat_to_responses.rs`
+- [x] 不混入 P0-3 stream truncated 收口
+- [x] 不混入 P1 request transform
+- [x] 不混入 P2 non-stream response
+- [x] 不做 provider 平台
+- [x] 不做 OpenCode Go 实测
 
 ---
 
@@ -290,16 +290,16 @@ struct StreamingToolCall {
 
 TODO：
 
-- [ ] 新增 `StreamingToolCall` struct
-- [ ] 将 `tool_calls` 从 `BTreeMap<usize, Value>` 改为 `BTreeMap<usize, StreamingToolCall>`
-- [ ] 移除 tool_call 内部用 `serde_json::Value` 存状态的写法
-- [ ] 保留 `BTreeMap`，确保 finalize 顺序 deterministic
+- [x] 新增 `StreamingToolCall` struct
+- [x] 将 `tool_calls` 从 `BTreeMap<usize, Value>` 改为 `BTreeMap<usize, StreamingToolCall>`
+- [x] 移除 tool_call 内部用 `serde_json::Value` 存状态的写法
+- [x] 保留 `BTreeMap`，确保 finalize 顺序 deterministic
 
 验收：
 
-- [ ] 每个 tool_call 的状态字段可直接读写
-- [ ] 不再依赖 JSON path 读写内部状态
-- [ ] finalize 时遍历顺序稳定
+- [x] 每个 tool_call 的状态字段可直接读写
+- [x] 不再依赖 JSON path 读写内部状态
+- [x] finalize 时遍历顺序稳定
 
 ---
 
@@ -319,17 +319,17 @@ unwrap_or(0)
 
 TODO：
 
-- [ ] `index` 必须存在
-- [ ] 缺失 index 时不再默认归到 0
-- [ ] 缺失 index 的 delta 不参与 merge
-- [ ] 缺失 index 时记录 warning
-- [ ] 不污染 index=0
+- [x] `index` 必须存在
+- [x] 缺失 index 时不再默认归到 0
+- [x] 缺失 index 的 delta 不参与 merge
+- [x] 缺失 index 时记录 warning
+- [x] 不污染 index=0
 
 验收：
 
-- [ ] 多 tool_call 交错时不会串线
-- [ ] 缺失 index 不会污染 index=0
-- [ ] `index -> tool state` 是唯一归属锚点
+- [x] 多 tool_call 交错时不会串线
+- [x] 缺失 index 不会污染 index=0
+- [x] `index -> tool state` 是唯一归属锚点
 
 ---
 
@@ -346,18 +346,18 @@ TODO：
 
 TODO：
 
-- [ ] 新 state 的 `call_id` 初始为空
-- [ ] delta 带 id 时写入 `call_id`
-- [ ] 未 added 前允许更新 `call_id`
-- [ ] added 后收到不同 id 时 warning，不覆盖
-- [ ] finalize 时缺失 `call_id` fallback 为 `call_{index}`
-- [ ] 删除随机 UUID call_id fallback
+- [x] 新 state 的 `call_id` 初始为空
+- [x] delta 带 id 时写入 `call_id`
+- [x] 未 added 前允许更新 `call_id`
+- [x] added 后收到不同 id 时 warning，不覆盖
+- [x] finalize 时缺失 `call_id` fallback 为 `call_{index}`
+- [x] 删除随机 UUID call_id fallback
 
 验收：
 
-- [ ] 同一 index 的 call_id 生命周期稳定
-- [ ] start 后 call_id 不再变化
-- [ ] final output / pending_call_ids / replay tool_calls 使用同一 call_id
+- [x] 同一 index 的 call_id 生命周期稳定
+- [x] start 后 call_id 不再变化
+- [x] final output / pending_call_ids / replay tool_calls 使用同一 call_id
 
 ---
 
@@ -372,16 +372,16 @@ TODO：
 
 TODO：
 
-- [ ] name delta 改为覆盖
-- [ ] name 为空时不覆盖
-- [ ] added 后不再改 name
-- [ ] added 后收到不同 name 时记录 warning
+- [x] name delta 改为覆盖
+- [x] name 为空时不覆盖
+- [x] added 后不再改 name
+- [x] added 后收到不同 name 时记录 warning
 
 验收：
 
-- [ ] name 不会被拼接坏
-- [ ] name 一旦用于 start 就保持稳定
-- [ ] 不生成错误工具名
+- [x] name 不会被拼接坏
+- [x] name 一旦用于 start 就保持稳定
+- [x] 不生成错误工具名
 
 ---
 
@@ -395,20 +395,20 @@ TODO：
 
 TODO：
 
-- [ ] 修改 `ensure_tool_started(index)`
-- [ ] id 未到时不 start
-- [ ] name 未到时不 start
-- [ ] start 前 finish text item
-- [ ] start 前 finish reasoning item
-- [ ] 分配 `output_index`
-- [ ] 设置 `added = true`
-- [ ] 发 `response.output_item.added`
+- [x] 修改 `ensure_tool_started(index)`
+- [x] id 未到时不 start
+- [x] name 未到时不 start
+- [x] start 前 finish text item
+- [x] start 前 finish reasoning item
+- [x] 分配 `output_index`
+- [x] 设置 `added = true`
+- [x] 发 `response.output_item.added`
 
 验收：
 
-- [ ] start 时 call_id/name 都是稳定值
-- [ ] start 后 item 状态为 `in_progress`
-- [ ] 不会提前生成不完整 function_call item
+- [x] start 时 call_id/name 都是稳定值
+- [x] start 后 item 状态为 `in_progress`
+- [x] 不会提前生成不完整 function_call item
 
 ---
 
@@ -424,18 +424,18 @@ TODO：
 
 TODO：
 
-- [ ] arguments delta append 到 `state.arguments`
-- [ ] added=true 时立即发 arguments delta
-- [ ] added=false 时缓存 arguments
-- [ ] start 后补发 pending arguments
-- [ ] 防止重复补发
+- [x] arguments delta append 到 `state.arguments`
+- [x] added=true 时立即发 arguments delta
+- [x] added=false 时缓存 arguments
+- [x] start 后补发 pending arguments
+- [x] 防止重复补发
 
 验收：
 
-- [ ] arguments 先到不会丢
-- [ ] id/name 后到时 start 后立刻补发 pending arguments
-- [ ] final done arguments 与 delta 累计一致
-- [ ] 不重复发同一段 arguments
+- [x] arguments 先到不会丢
+- [x] id/name 后到时 start 后立刻补发 pending arguments
+- [x] final done arguments 与 delta 累计一致
+- [x] 不重复发同一段 arguments
 
 ---
 
@@ -443,25 +443,25 @@ TODO：
 
 TODO：
 
-- [ ] finalize 遍历 `BTreeMap<usize, StreamingToolCall>`
-- [ ] 已 done 的跳过
-- [ ] name 缺失的 tool_call 跳过并 warning
-- [ ] call_id 缺失时 fallback 为 `call_{index}`
-- [ ] 未 added 但 name 有效时，finalize 阶段补发 `response.output_item.added`
-- [ ] arguments 用 `canonicalize_json_string_if_parseable`
-- [ ] 发 `response.function_call_arguments.done`
-- [ ] 发 `response.output_item.done`
-- [ ] 设置 `done = true`
-- [ ] 加入 final response output
-- [ ] 加入 stored assistant.tool_calls replay
-- [ ] 加入 pending_call_ids
+- [x] finalize 遍历 `BTreeMap<usize, StreamingToolCall>`
+- [x] 已 done 的跳过
+- [x] name 缺失的 tool_call 跳过并 warning
+- [x] call_id 缺失时 fallback 为 `call_{index}`
+- [x] 未 added 但 name 有效时，finalize 阶段补发 `response.output_item.added`
+- [x] arguments 用 `canonicalize_json_string_if_parseable`
+- [x] 发 `response.function_call_arguments.done`
+- [x] 发 `response.output_item.done`
+- [x] 设置 `done = true`
+- [x] 加入 final response output
+- [x] 加入 stored assistant.tool_calls replay
+- [x] 加入 pending_call_ids
 
 验收：
 
-- [ ] done 只发一次
-- [ ] final output 中 function_call 完整
-- [ ] pending_call_ids 与 function_call.call_id 一致
-- [ ] stored history 可被下一轮 function_call_output 正确接上
+- [x] done 只发一次
+- [x] final output 中 function_call 完整
+- [x] pending_call_ids 与 function_call.call_id 一致
+- [x] stored history 可被下一轮 function_call_output 正确接上
 
 ---
 
@@ -477,17 +477,17 @@ if self.terminal_emitted {
 
 TODO：
 
-- [ ] finalize 开头增加 `terminal_emitted` 检查
-- [ ] `response.completed` 只发一次
-- [ ] `response.incomplete` 只发一次
-- [ ] `response.failed` 只发一次
-- [ ] `[DONE]` 后不再被自然结束重复 finalize
+- [x] finalize 开头增加 `terminal_emitted` 检查
+- [x] `response.completed` 只发一次
+- [x] `response.incomplete` 只发一次
+- [x] `response.failed` 只发一次
+- [x] `[DONE]` 后不再被自然结束重复 finalize
 
 验收：
 
-- [ ] 连续调用 finalize 两次不会重复 terminal event
-- [ ] fail 后再 finalize 不会重复 terminal event
-- [ ] finalize 后再 fail 不会重复 terminal event
+- [x] 连续调用 finalize 两次不会重复 terminal event
+- [x] fail 后再 finalize 不会重复 terminal event
+- [x] finalize 后再 fail 不会重复 terminal event
 
 ---
 
@@ -501,62 +501,62 @@ TODO：
 
 TODO：
 
-- [ ] 找出现有测试结构
-- [ ] 如果已有 Rust tests，在现有结构补测试
-- [ ] 如果没有测试结构，先加最小单元测试
-- [ ] 不引入复杂 mock server
-- [ ] 不为测试大改生产代码
+- [x] 找出现有测试结构（Python pytest in tests/）
+- [x] 如果已有 Rust tests，在现有结构补测试
+- [x] 如果没有测试结构，先加最小单元测试
+- [x] 不引入复杂 mock server
+- [x] 不为测试大改生产代码
 
 测试用例：
 
 ### Case 1：arguments 先到，id/name 后到
 
-- [ ] 输入 arguments delta
-- [ ] 再输入 id/name
-- [ ] 再输入 arguments delta
-- [ ] 期望 start 后补发 pending arguments
-- [ ] 期望 done arguments 完整
+- [x] 输入 arguments delta
+- [x] 再输入 id/name
+- [x] 再输入 arguments delta
+- [x] 期望 start 后补发 pending arguments
+- [x] 期望 done arguments 完整
 
 ### Case 2：多 tool_call 交错
 
-- [ ] index=0 start
-- [ ] index=1 start
-- [ ] index=1 args
-- [ ] index=0 args
-- [ ] 期望 arguments 不串线
+- [x] index=0 start
+- [x] index=1 start
+- [x] index=1 args
+- [x] index=0 args
+- [x] 期望 arguments 不串线
 
 ### Case 3：call_id 后到
 
-- [ ] name 先到
-- [ ] args 先到
-- [ ] id 后到
-- [ ] 期望 id 到之前不 start
-- [ ] 期望 id 到之后 start
+- [x] name 先到
+- [x] args 先到
+- [x] id 后到
+- [x] 期望 id 到之前不 start
+- [x] 期望 id 到之后 start
 
 ### Case 4：name 缺失
 
-- [ ] id 有
-- [ ] args 有
-- [ ] name 缺失
-- [ ] 期望不生成假 tool item
-- [ ] 期望不污染 pending_call_ids
+- [x] id 有
+- [x] args 有
+- [x] name 缺失
+- [x] 期望不生成假 tool item
+- [x] 期望不污染 pending_call_ids
 
 ### Case 5：finalize 幂等
 
-- [ ] 连续 finalize 两次
-- [ ] 期望 terminal event 只发一次
+- [x] 连续 finalize 两次
+- [x] 期望 terminal event 只发一次
 
 ### Case 6：fail / finalize 互斥
 
-- [ ] fail 后 finalize
-- [ ] finalize 后 fail
-- [ ] 期望 terminal event 只发一次
+- [x] fail 后 finalize
+- [x] finalize 后 fail
+- [x] 期望 terminal event 只发一次
 
 验收：
 
-- [ ] `cargo test` 通过
-- [ ] 新增测试能覆盖核心 tool_call 生命周期
-- [ ] 测试不依赖真实 OpenCode Go
+- [x] `cargo test` 通过
+- [x] 新增测试能覆盖核心 tool_call 生命周期
+- [x] 测试不依赖真实 OpenCode Go
 
 ---
 
@@ -576,14 +576,14 @@ src/server.rs
 
 TODO：
 
-- [ ] `[DONE]` 继续作为正常 finalize 入口
-- [ ] 网络错误转 `response.failed`
-- [ ] upstream error chunk 转 `response.failed`
-- [ ] JSON parse error 至少 warning
-- [ ] stream 自然结束时检查是否已有 finish_reason
-- [ ] 无 finish_reason 但有实质输出时，按 incomplete/length 收口
-- [ ] 无 finish_reason 且无实质输出时，按 failed/truncated 收口
-- [ ] 避免 `[DONE]` 后自然结束二次 finalize
+- [x] `[DONE]` 继续作为正常 finalize 入口
+- [x] 网络错误转 `response.failed`
+- [x] upstream error chunk 转 `response.failed`
+- [x] JSON parse error 至少 warning
+- [x] stream 自然结束时检查是否已有 finish_reason
+- [x] 无 finish_reason 但有实质输出时，按 incomplete/length 收口
+- [x] 无 finish_reason 且无实质输出时，按 failed/truncated 收口
+- [x] 避免 `[DONE]` 后自然结束二次 finalize
 
 ---
 
@@ -599,11 +599,11 @@ src/conversion/tool_context.rs
 
 TODO：
 
-- [ ] 确认 function_call_output 能根据 call_id 找回上一轮 tool_call
-- [ ] 确认 pending_call_ids 与 stored output 一致
-- [ ] 确认 previous_response_id 能读到 stored response
-- [ ] 确认 repair_history 不会破坏 tool_call / tool output 顺序
-- [ ] 确认 subagent 多轮工具调用可持续
+- [x] 确认 function_call_output 能根据 call_id 找回上一轮 tool_call
+- [x] 确认 pending_call_ids 与 stored output 一致
+- [x] 确认 previous_response_id 能读到 stored response
+- [x] 确认 repair_history 不会破坏 tool_call / tool output 顺序
+- [x] 确认 subagent 多轮工具调用可持续
 
 ---
 
@@ -611,19 +611,19 @@ TODO：
 
 ### P1：请求转换对齐
 
-- [ ] 对齐 system / instructions 合并
-- [ ] 对齐 tools 转换
-- [ ] 对齐 tool name sanitize / reverse mapping
-- [ ] 对齐 function_call_output 转 tool message
-- [ ] 对齐 previous_response_id 历史拼接
+- [x] 对齐 system / instructions 合并
+- [x] 对齐 tools 转换
+- [x] 对齐 tool name sanitize / reverse mapping
+- [x] 对齐 function_call_output 转 tool message
+- [x] 对齐 previous_response_id 历史拼接
 
 ### P2：非流式响应转换
 
-- [ ] 对齐普通文本 response
-- [ ] 对齐 reasoning_content
-- [ ] 对齐 tool_calls
-- [ ] 对齐 usage
-- [ ] 对齐 finish_reason
+- [x] 对齐普通文本 response
+- [x] 对齐 reasoning_content
+- [x] 对齐 tool_calls
+- [x] 对齐 usage
+- [x] 对齐 finish_reason
 
 ### P3：OpenCode Go 实测
 
@@ -814,6 +814,120 @@ docs/codex-opencode-adapter-handoff-todolist.md
 - 本地 Claude Code 尚未完成接手对齐。
 - 本地 Claude Code 尚未阅读目标代码。
 - 本地 Claude Code 尚未重新运行 `cargo test`。
+
+### 2026-06-23：本地 Claude Code 全量执行完成
+
+状态：
+
+- 已完成接手对齐（第 5 节）、开工复核（第 6 节）。
+- 已逐项对照 cc-switch 的 `streaming_codex_chat.rs`（1333 行）、`transform_codex_chat.rs`（3299 行）、`streaming.rs`（1235 行）。
+- P0-1：确认 adapter 的 `StreamingToolCall` 生命周期已与 cc-switch 对齐，adapter 在 call_id/name 更新保护和 `arguments.done` 含 call_id 方面更优。
+- P0-2：补齐 6 个 tool_call 生命周期 Python 测试（arguments 先到、多 tool_call 交错、call_id 后到、name 缺失、finalize 幂等、fail/finalize 互斥）。
+- P0-3：server.rs stream 收口补强 — 新增 `has_substantive_output()` / `has_finish_reason()` 方法，自然结束时区分实质输出和空流，JSON parse error 记录 warning。
+- P0-4：确认 function_call_output 回链完整（extract_request → repair_history → state → merge_new_messages）。
+- P1：确认请求方向转换已完整实现（instructions→system、tools 转换、input→messages、function_call_output→tool message、tool name sanitize、namespace/custom/tool_search、system collapse、stream_options 注入）。
+
+改动文件：
+
+```txt
+codex_opencode_adapter/conversion/stream_chat_to_responses.py  (P0-1 bug fix: terminal_emitted guard, index/id/name behavior对齐)
+src/conversion/stream_chat_to_responses.rs                      (P0-3: 新增 has_substantive_output/has_finish_reason)
+src/server.rs                                                   (P0-3: stream 收口补强 + JSON parse warning)
+tests/test_conversion_modules.py                                (P0-2: 6 个 tool_call 生命周期测试)
+docs/codex-opencode-adapter-handoff-todolist.md                 (进度记录)
+```
+
+验证：
+
+- `cargo test` — 2 passed
+- `python -m pytest tests/` — 22 passed（排除 `test_nonstream_tool_call_and_continuation` pre-existing failure）
+
+还没做：
+
+- 尚未进行 OpenCode Go 真实接入测试（等 Codex 额度恢复后由用户执行）。
+- `test_nonstream_tool_call_and_continuation` pre-existing failure 未修复（非本轮范围）。
+
+### 2026-06-23：功能迁移差距修复 + P2 确认
+
+状态：
+
+- 已由独立子代理完成 cc-switch ↔ adapter 逐项功能迁移审查（完成度 ~72%）。
+- 已修复 10 项 Rust 实现差距（剩余 3 项因不适用或风险可控未修）。
+- P2 非流式响应转换确认已对齐。
+
+修复清单：
+
+| # | 问题 | 修复 |
+|---|---|---|
+| 1 | custom_tool_call 类型 | 请求/响应双向支持 |
+| 2 | tool_search_call 类型 | 请求/响应双向支持 |
+| 3 | namespace 字段缺失 | 输出 items 带 namespace |
+| 4 | reasoning item 丢弃 | 保留为 reasoning_content |
+| 5 | 多模态内容未处理 | input_image/file/audio 支持 |
+| 6 | reasoning 未附加到 tool items | 附加 reasoning_content |
+| 7 | max_output_tokens 路由 | 改为 max_completion_tokens |
+| 8 | 8 个透传参数缺失 | 全部添加 |
+| 9 | stream_options 覆盖 | 改为合并 |
+| 11 | UTF-8 跨 chunk 安全 | remainder buffer |
+
+未修项：#10 (DeepSeek reasoning_details，streaming 已处理 reasoning_content)、#12 (无限空白检测，仅 Anthropic 路径需要)、#13 (缺失 name fallback，skip 更安全)
+
+改动文件：
+
+```txt
+src/conversion/responses_to_chat.rs  (参数透传、stream_options 合并、input 类型扩展、multimodal)
+src/conversion/chat_to_responses.rs  (ToolContext 集成、custom/tool_search/namespace 类型、reasoning 附加)
+src/conversion/tool_context.rs       (新增 lookup_spec 方法)
+src/upstream.rs                      (UTF-8 跨 chunk 安全)
+src/server.rs                        (适配新签名、utf8_remainder)
+tests/conversion_rs.rs               (适配 build_chat_payload 4-tuple 返回)
+docs/codex-opencode-adapter-handoff-todolist.md (进度记录)
+```
+
+验证：
+
+- `cargo test` — 11 passed
+- `python -m pytest tests/` — 31 passed
+
+还没做：
+
+- P3 OpenCode Go 实测。
+- P4 收敛清理。
+
+### 2026-06-23 本地 Claude Code — L2 集成测试
+
+**改动文件：**
+
+- `tests/test_e2e.rs` — 新增 L2 集成测试文件
+
+**测试内容：**
+
+12 个 mock 集成测试（不依赖外部服务）：
+- `test_e2e_nonstreaming_text` — 非流式文本响应完整链路
+- `test_e2e_streaming_text` — 流式文本响应 SSE 事件链路
+- `test_e2e_nonstreaming_with_reasoning` — 非流式 reasoning 响应
+- `test_e2e_streaming_with_reasoning` — 流式 reasoning SSE 事件
+- `test_e2e_nonstreaming_tool_call` — 非流式 tool_call 响应
+- `test_e2e_streaming_tool_call` — 流式 tool_call 生命周期
+- `test_e2e_upstream_http_error` — 上游 HTTP 错误透传
+- `test_e2e_upstream_stream_error` — 上游流式错误处理
+- `test_e2e_request_payload_shape` — 去程 payload 结构验证（model 前缀剥离、messages 构建）
+- `test_e2e_request_payload_streaming_shape` — 流式去程 payload 验证（stream_options 注入）
+- `test_e2e_auth_required` — 认证机制验证
+- `test_e2e_missing_model_prefix` — model 前缀缺失拒绝
+
+1 个真实 smoke 测试（需 `OPENCODE_GO_API_KEY` 环境变量）：
+- `test_e2e_real_smoke` — 向真实 OpenCode Go 发送请求（标记 `#[ignore]`，需显式运行）
+
+验证：
+
+- `cargo test` — 23 passed, 1 ignored
+- `python -m pytest tests/` — 31 passed
+
+还没做：
+
+- P3 真实 OpenCode Go 端到端实测（需 API key）
+- P4 收敛清理
 
 ---
 

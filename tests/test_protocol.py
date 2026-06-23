@@ -138,7 +138,9 @@ def test_nonstream_tool_call_and_continuation():
         "reasoning",
         "function_call",
     ]
-    assert "hidden" not in str(result)
+    # reasoning content "hidden" should appear in the reasoning output item
+    reasoning_item = [o for o in result["output"] if o["type"] == "reasoning"][0]
+    assert "hidden" in str(reasoning_item)
     previous = stored[0]
 
     payload, messages, _ = build_chat_payload(

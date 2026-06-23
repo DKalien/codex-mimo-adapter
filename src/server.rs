@@ -12,7 +12,7 @@ use tokio::sync::Semaphore;
 use crate::config::Config;
 use crate::conversion::{build_chat_payload, build_response, function_output_call_ids, StreamAssembler};
 use crate::state::StateStore;
-use crate::upstream::{parse_chat_sse_bytes, sse_data_from_block, OpenCodeGoClient, UpstreamError};
+use crate::upstream::{extract_error_message, parse_chat_sse_bytes, sse_data_from_block, OpenCodeGoClient, UpstreamError};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -86,7 +86,7 @@ async fn complete_response(state: AppState, body: Value) -> Response {
         Ok(previous) => previous,
         Err(message) => return error_response(StatusCode::BAD_REQUEST, "invalid_request_error", &message),
     };
-    let (payload, messages, reverse) = match build_chat_payload(&body, &model_upstream, previous.as_ref(), json!({})) {
+    let (payload, messages, _reverse, tool_ctx) = match build_chat_payload(&body, &model_upstream, previous.as_ref(), json!({})) {
         Ok(value) => value,
         Err(error) => return error_response(StatusCode::BAD_REQUEST, "invalid_request_error", &error.to_string()),
     };
@@ -100,7 +100,7 @@ async fn complete_response(state: AppState, body: Value) -> Response {
         Ok(value) => value,
         Err(error) => return upstream_error(error),
     };
-    match build_response(&body, &upstream, &model_alias, &model_upstream, &messages, &reverse, |item| state.state.put(&item)) {
+    match build_response(&body, &upstream, &model_alias, &model_upstream, &messages, &tool_ctx, |item| state.state.put(&item)) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", &error.to_string()),
     }
@@ -119,7 +119,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
         Ok(previous) => previous,
         Err(message) => return error_response(StatusCode::BAD_REQUEST, "invalid_request_error", &message),
     };
-    let (payload, messages, reverse) = match build_chat_payload(&body, &model_upstream, previous.as_ref(), json!({})) {
+    let (payload, messages, _reverse, tool_ctx) = match build_chat_payload(&body, &model_upstream, previous.as_ref(), json!({})) {
         Ok(value) => value,
         Err(error) => return error_response(StatusCode::BAD_REQUEST, "invalid_request_error", &error.to_string()),
     };
@@ -133,7 +133,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
             model_alias.clone(),
             model_upstream.clone(),
             messages,
-            reverse,
+            tool_ctx.reverse_names.clone(),
             Box::new(move |item| state_for_task.state.put(&item)),
             Box::new(move |event, data| {
                 let sse = axum::response::sse::Event::default().event(event.to_string()).data(data.to_string());
@@ -155,10 +155,11 @@ async fn stream_response(state: AppState, body: Value) -> Response {
         match upstream {
             Ok(mut stream) => {
                 let mut buffer = String::new();
+                let mut utf8_remainder: Vec<u8> = Vec::new();
                 while let Some(chunk) = stream.next().await {
                     match chunk {
                         Ok(bytes) => {
-                            for block in parse_chat_sse_bytes(&mut buffer, &bytes) {
+                            for block in parse_chat_sse_bytes(&mut buffer, &mut utf8_remainder, &bytes) {
                                 if let Some(data) = sse_data_from_block(&block) {
                                     if data.trim() == "[DONE]" {
                                         let _ = assembler.finalize();
@@ -166,13 +167,17 @@ async fn stream_response(state: AppState, body: Value) -> Response {
                                         return;
                                     }
                                     if let Ok(value) = serde_json::from_str::<Value>(&data) {
-                                        if value.get("error").is_some() {
-                                            let message = value.get("error").and_then(|e| e.get("message")).and_then(Value::as_str).unwrap_or("upstream stream error");
-                                            let _ = assembler.fail("upstream_error", message);
+                                        let is_error = value.get("error").is_some()
+                                            || value.get("base_resp").is_some();
+                                        if is_error {
+                                            let message = extract_error_message(&value).unwrap_or_else(|| "upstream stream error".to_string());
+                                            let _ = assembler.fail("upstream_error", &message);
                                             let _ = tx.send(Ok(axum::response::sse::Event::default().data("[DONE]")));
                                             return;
                                         }
                                         let _ = assembler.accept(&value);
+                                    } else {
+                                        tracing::warn!(data = %data, "failed to parse upstream SSE data as JSON");
                                     }
                                 }
                             }
@@ -184,7 +189,13 @@ async fn stream_response(state: AppState, body: Value) -> Response {
                         }
                     }
                 }
-                let _ = assembler.finalize();
+                // Stream ended naturally (no [DONE] received).
+                // Align with cc-switch: distinguish between substantive output and empty stream.
+                if assembler.has_finish_reason() || assembler.has_substantive_output() {
+                    let _ = assembler.finalize();
+                } else {
+                    let _ = assembler.fail("stream_truncated", "Upstream stream ended before sending finish_reason");
+                }
                 let _ = tx.send(Ok(axum::response::sse::Event::default().data("[DONE]")));
             }
             Err(error) => {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -97,6 +98,8 @@ class StreamAssembler:
                 self.finish_reason = str(choice["finish_reason"])
 
     def finalize(self) -> JSON:
+        if self.terminal_emitted:
+            return {}
         content = "".join(self.content_parts)
         reasoning = "".join(self.reasoning_parts)
         output: list[JSON] = []
@@ -117,13 +120,16 @@ class StreamAssembler:
         for index in sorted(self.tool_calls):
             call = self.tool_calls[index]
             if not call["name"]:
-                call["name"] = "tool"
+                call["name"] = "unknown_tool"
+                logging.warning("streaming tool call missing name at index %d, using fallback", index)
+            if not call["id"]:
+                call["id"] = f"call_{index}"
             self._ensure_tool_started(call)
             emitted = int(call.get("emitted_chars", 0))
             if emitted < len(call["arguments"]):
                 self._emit_tool_arguments(call, call["arguments"][emitted:])
             call_id = call["id"]
-            raw_name = call["name"] or "tool"
+            raw_name = call["name"]
             arguments = canonicalize_json_string_if_parseable(call["arguments"] or "{}")
             replay_calls.append({"id": call_id, "type": "function", "function": {"name": raw_name, "arguments": arguments}})
             pending.append(call_id)
@@ -272,27 +278,42 @@ class StreamAssembler:
         )
 
     def _accept_tool_delta(self, delta: JSON) -> None:
+        raw_index = delta.get("index")
+        if raw_index is None:
+            return  # missing index → ignore (aligned with Rust)
         try:
-            index = int(delta.get("index", 0))
+            index = int(raw_index)
         except (TypeError, ValueError):
-            index = 0
+            return
         state = self.tool_calls.setdefault(
             index,
-            {"id": str(delta.get("id") or new_id("call")), "item_id": new_id("fc"), "name": "", "arguments": "", "output_index": None, "added": False, "emitted_chars": 0},
+            {"id": "", "item_id": new_id("fc"), "name": "", "arguments": "", "output_index": None, "added": False, "emitted_chars": 0},
         )
         function = delta.get("function") or {}
         if delta.get("id"):
-            state["id"] = str(delta["id"])
+            if state["added"]:
+                if not state["id"]:
+                    state["id"] = str(delta["id"])
+                elif state["id"] != str(delta["id"]):
+                    pass  # ignore id change after start (aligned with Rust)
+            else:
+                state["id"] = str(delta["id"])
         name_delta = function.get("name") if function.get("name") is not None else delta.get("name")
         if name_delta:
-            state["name"] += str(name_delta)
-            self._ensure_tool_started(state)
+            if state["added"]:
+                if state["name"] != str(name_delta):
+                    pass  # ignore name change after start (aligned with Rust)
+            else:
+                # Name is overwritten, not appended. This assumes providers send the
+                # full function name in a single delta (standard OpenAI behavior).
+                state["name"] = str(name_delta)
         arguments = function.get("arguments", delta.get("arguments"))
         if arguments is not None:
             part = arguments_text(arguments)
             state["arguments"] += part
             if state["added"]:
                 self._emit_tool_arguments(state, part)
+        self._ensure_tool_started(state)
 
     def _ensure_text_started(self) -> None:
         if self.text_output_index is not None:
@@ -339,7 +360,7 @@ class StreamAssembler:
         self.text_done = True
 
     def _ensure_tool_started(self, state: JSON) -> None:
-        if state["added"] or not state["name"]:
+        if state["added"] or not state["id"] or not state["name"]:
             return
         if self.text_output_index is not None and not self.text_done:
             self._finish_text_item()

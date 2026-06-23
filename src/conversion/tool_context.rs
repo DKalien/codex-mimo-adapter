@@ -50,6 +50,10 @@ impl ToolContext {
             .unwrap_or(false)
     }
 
+    pub fn lookup_spec(&self, chat_name: &str) -> Option<&ToolSpec> {
+        self.specs_by_chat_name.get(chat_name)
+    }
+
     fn add_response_tool(&mut self, item: &Value) {
         if let Some(name) = item.as_str() {
             self.add_custom(&json!({"type":"custom","name":name}), ToolKind::Custom);
