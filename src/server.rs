@@ -133,7 +133,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
             model_alias.clone(),
             model_upstream.clone(),
             messages,
-            tool_ctx.reverse_names.clone(),
+            tool_ctx,
             Box::new(move |item| state_for_task.state.put(&item)),
             Box::new(move |event, data| {
                 let sse = axum::response::sse::Event::default().event(event).data(data.to_string());
@@ -189,8 +189,6 @@ async fn stream_response(state: AppState, body: Value) -> Response {
                         }
                     }
                 }
-                // Stream ended naturally (no [DONE] received).
-                // Align with cc-switch: distinguish between substantive output and empty stream.
                 if assembler.has_finish_reason() || assembler.has_substantive_output() {
                     let _ = assembler.finalize();
                 } else {
@@ -237,11 +235,7 @@ fn strip_model_prefix(model: &str) -> Result<String, &'static str> {
     let Some(rest) = model.strip_prefix("opencode-go/") else {
         return Err("model must use the opencode-go/ prefix");
     };
-    if rest.is_empty() {
-        Err("model id is empty")
-    } else {
-        Ok(rest.to_string())
-    }
+    if rest.is_empty() { Err("model id is empty") } else { Ok(rest.to_string()) }
 }
 
 fn error_response(status: StatusCode, kind: &str, message: &str) -> Response {
