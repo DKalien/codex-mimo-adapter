@@ -33,6 +33,24 @@ This adapter is not a fork of cc-switch and does not attempt to reproduce its
 provider routing, UI, session management, hooks, plugins, status line, model
 pricing, fallback routing, or provider registry.
 
+In addition to cc-switch, this project also references
+[`goldtetsola/opencode-bridge`](https://github.com/goldtetsola/opencode-bridge)
+as a real-world Codex + OpenCode Go adapter experience source.
+
+The reference scope is limited to adapter-layer behavior observed around real
+OpenCode Go usage:
+
+- SSE terminal handling and avoiding silent stream disconnects.
+- Early `response.created` emission and stream timeout avoidance.
+- Chat `content + tool_calls` handling to avoid Codex tool-call adoption issues.
+- GPT-family or unknown model misrouting safeguards.
+- Orphan tool-output recovery and Responses-compatible failed-result shaping.
+- Lightweight diagnostics for tool-call continuation failures.
+
+This project does not adopt opencode-bridge's broader runtime architecture,
+including MissionV1, OSS agent task tiers, evidence ledgers, RunRecord,
+runtime-owned tool execution, patch escrow, claim gates, or burn-in framework.
+
 cc-switch was used only as a behavior reference for protocol compatibility
 around Codex Responses <-> Chat Completions conversion. The relevant reference
 files are:
