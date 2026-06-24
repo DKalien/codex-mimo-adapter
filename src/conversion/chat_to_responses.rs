@@ -80,6 +80,20 @@ where
             pending.push(call_id.clone());
 
             let spec = context.lookup_spec(raw_name);
+            let tool_kind = match spec.as_ref().map(|s| &s.kind) {
+                Some(ToolKind::Custom) => "custom_tool_call",
+                Some(ToolKind::ToolSearch) => "tool_search_call",
+                _ => "function_call",
+            };
+            tracing::debug!(
+                event = "tool_call_emitted",
+                response_id = %response_id,
+                call_id = %call_id,
+                tool_name = %raw_name,
+                tool_kind,
+                stream = false,
+                "tool call emitted from upstream response"
+            );
             let mut item = match spec.as_ref().map(|s| &s.kind) {
                 Some(ToolKind::Custom) => json!({
                     "type": "custom_tool_call",
@@ -147,6 +161,14 @@ where
             .unwrap_or("")
             .to_string(),
     })?;
+    if !pending.is_empty() {
+        tracing::debug!(
+            event = "tool_call_pending_stored",
+            response_id = %response_id,
+            pending_call_ids = ?pending,
+            "stored pending tool calls for continuation"
+        );
+    }
 
     let usage = chat_response
         .get("usage")
