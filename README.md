@@ -59,10 +59,12 @@ The implemented Rust equivalents are intentionally narrower:
 | Chat stream -> Responses stream conversion | `src/conversion/stream_chat_to_responses.rs`, `src/upstream.rs` |
 | OpenCode Go request/response integration | `src/server.rs`, `src/upstream.rs` |
 | Multimodal model capability guard | `src/media_guard.rs` |
-| State replay for tool continuations | `src/state.rs` |
+| State replay for tool continuations | `src/state.rs`, `src/codex_chat_history.rs` |
 
 The intended compatibility target is the Codex subagent -> OpenCode Go path, not
-a general-purpose provider aggregation platform.
+a general-purpose provider aggregation platform. The state replay implementation
+is a narrow StoredResponse continuation path, not a full port of cc-switch's
+`codex_chat_history.rs` repair subsystem.
 
 ## Current status
 
@@ -70,11 +72,11 @@ This project is in the protocol-compatibility and validation phase.
 
 | Area | Status | Notes |
 |---|---|---|
-| Responses -> Chat request conversion | Implemented | Covers instructions, input history, tool calls, tool outputs, tool choice, reasoning parameters, and multimodal input blocks |
-| Chat -> Responses non-stream conversion | Implemented | Covers text, reasoning, usage, finish reasons, function calls, custom tool calls, tool search calls, and stored replay state |
+| Responses -> Chat request conversion | Implemented | Covers instructions, input history, tool calls, tool outputs, tool choice, and multimodal input blocks |
+| Chat -> Responses non-stream conversion | Implemented | Covers text, reasoning extraction, usage, finish reasons, function calls, custom tool calls, tool search calls, and stored replay state |
 | Chat stream -> Responses stream conversion | Implemented | Covers Responses SSE lifecycle, text deltas, reasoning deltas, streamed tool-call assembly, custom tool input finalization, tool search, terminal events, failed streams, and truncated streams |
-| Tool lifecycle and state replay | Implemented | `previous_response_id` and pending tool call IDs are stored locally so tool-result continuations can be repaired |
-| OpenCode Go reasoning compatibility | Implemented for known profiles | DeepSeek V4 and MiMo reasoning variants are handled through explicit metadata/config behavior |
+| Tool lifecycle and state replay | Implemented, narrow scope | `previous_response_id` and pending tool call IDs are stored locally so tool-result continuations can be repaired; this is not the full cc-switch history repair subsystem |
+| Reasoning output compatibility | Implemented for extraction/splitting | Reads upstream reasoning fields and leading `<think>...</think>` blocks; provider-specific request-side reasoning parameter mapping remains limited until real upstream validation |
 | Tool search compatibility | Implemented | `tool_search` has a dedicated schema and converts to/from Responses `tool_search_call` instead of being treated as a custom tool |
 | Multimodal input conversion | Implemented | Request-side `input_image`, base64 image source, `input_file`, `input_audio`, and mixed content arrays are converted to Chat-compatible content blocks |
 | Multimodal text-only model guard | Implemented | Known text-only models return a valid Responses `failed` result instead of an HTTP provider error when media input is present |
@@ -94,6 +96,23 @@ cargo test --test multimodal_regression
 cargo test --test test_e2e
 cargo test
 ```
+
+## Known gaps before real validation
+
+These are known protocol differences from cc-switch that should be verified
+against real Codex subagent traffic before expanding the adapter:
+
+- Stateless full-history requests that already contain both a `function_call` and
+  its `function_call_output` may still need an explicit no-previous-state path.
+- Some strict reasoning models may require a non-empty `reasoning_content`
+  placeholder on assistant messages that contain `tool_calls`.
+- Non-stream upstream errors may need to be wrapped as full Responses
+  `status: failed` objects instead of plain HTTP error objects if Codex treats
+  provider errors as a broken chain.
+- Streaming incomplete termination may need to be verified against Codex's exact
+  event expectations.
+- Multimodal output mapping is not implemented until real upstream output shapes
+  are observed.
 
 ## Roadmap
 
@@ -122,7 +141,8 @@ Implemented:
 
 ### P2.6 multimodal compatibility
 
-Implemented, but still requires local `cargo fmt` and `cargo test` validation after pull:
+Implemented in mock/regression coverage; real upstream validation is still
+pending:
 
 - Mixed text/image/file/audio Responses input conversion.
 - Anthropic-style base64 image source -> Chat `image_url` data URL.
@@ -281,21 +301,22 @@ tests/
 
 ## Reasoning compatibility
 
-The adapter reads `reasoning.effort` or `reasoning_effort` from a Responses
-request. It sends `reasoning_effort` upstream only when model metadata declares
-the requested variant using the verified OpenAI-compatible protocol.
+The adapter currently focuses on output-side reasoning compatibility:
 
-Current verified profiles:
+- It extracts upstream `reasoning_content`, `thinking`, `reasoning`, and
+  `reasoning_details` fields when present.
+- It splits a leading `<think>...</think>` block only when no explicit reasoning
+  field is present.
+- It retains reasoning content in stored chat history so tool continuations can
+  remain valid.
 
-- DeepSeek V4 Pro/Flash: `low`, `medium`, `high`, `max`
-- MiMo V2.5/Pro: `low`, `medium`, `high`
+Request-side provider-specific reasoning controls are intentionally limited until
+real OpenCode Go model behavior is verified. Unsupported or unknown reasoning
+settings should be treated as validation targets, not as confirmed upstream
+features.
 
-Models that support reasoning but do not declare adjustable variants keep their
-default behavior. Unsupported settings are reported in structured adapter
-metadata and logs rather than silently pretending to work.
-
-Reasoning content is retained only in stored chat history so tool continuations
-remain valid. It is not exposed as user-visible chain of thought.
+Reasoning content is retained for protocol compatibility. It is not exposed as
+user-visible chain of thought.
 
 ## Multimodal compatibility
 
