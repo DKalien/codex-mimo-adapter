@@ -24,11 +24,17 @@ async fn main() -> anyhow::Result<()> {
         config.timeout_seconds,
     )?;
     let state = StateStore::new(&config.state_db, config.state_ttl_seconds)?;
+    let max_concurrency = std::env::var("CODEX_OPENCODE_MAX_CONCURRENCY")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(8);
+    tracing::info!(max_concurrency, "adapter concurrency limit configured");
     let app_state = AppState {
         config,
         client,
         state,
-        capacity: Arc::new(Semaphore::new(8)),
+        capacity: Arc::new(Semaphore::new(max_concurrency)),
     };
     let app = router(app_state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
