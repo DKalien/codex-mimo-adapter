@@ -122,7 +122,7 @@ async fn complete_response(state: AppState, body: Value) -> Response {
     let model_upstream = match strip_model_prefix(&model_alias) {
         Ok(model) => model,
         Err(message) => {
-            return error_response(StatusCode::BAD_REQUEST, "invalid_request_error", message)
+            return responses_failed_response(&body, &model_alias, "invalid_model", message)
         }
     };
     let previous = match previous_response(&state, &body) {
@@ -221,7 +221,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
     let model_upstream = match strip_model_prefix(&model_alias) {
         Ok(model) => model,
         Err(message) => {
-            return error_response(StatusCode::BAD_REQUEST, "invalid_request_error", message)
+            return early_stream_failed_response(body, model_alias, "invalid_model", message)
         }
     };
     let previous = match previous_response(&state, &body) {
