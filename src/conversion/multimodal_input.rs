@@ -10,7 +10,9 @@ pub fn chat_content_from_response_content(content: &Value) -> Option<Value> {
                 .collect::<Vec<_>>();
             (!chat_parts.is_empty()).then(|| Value::Array(chat_parts))
         }
-        Value::Object(_) => response_content_part_to_chat_part(content).map(|part| Value::Array(vec![part])),
+        Value::Object(_) => {
+            response_content_part_to_chat_part(content).map(|part| Value::Array(vec![part]))
+        }
         _ => None,
     }
 }
@@ -73,7 +75,8 @@ fn image_url_object_from_part(part: &Value) -> Option<Value> {
 fn source_image_to_data_url(part: &Value) -> Option<Value> {
     let source = part.get("source")?.as_object()?;
     let source_type = source.get("type").and_then(Value::as_str)?;
-    if source_type != format!("{}{}", "base", "64") {
+    let base64_kind = format!("{}{}", "base", "64");
+    if source_type != base64_kind.as_str() {
         return None;
     }
     let data = source
