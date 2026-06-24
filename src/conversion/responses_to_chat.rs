@@ -3,6 +3,10 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use uuid::Uuid;
 
+use super::multimodal_input::{
+    audio_to_chat_content_part, chat_content_from_response_content, file_to_chat_content_part,
+    image_to_chat_content_part,
+};
 use super::text::{arguments_text, as_text, compact_json};
 use super::tool_context::{custom_tool_input_field, ToolContext};
 
@@ -291,39 +295,33 @@ fn extract_request_with_context(
                     role = "user".to_string();
                 }
                 let empty = Value::String(String::new());
-                messages.push(
-                    json!({"role":role,"content":as_text(obj.get("content").unwrap_or(&empty))}),
-                );
+                let content = obj.get("content").unwrap_or(&empty);
+                let chat_content = chat_content_from_response_content(content)
+                    .unwrap_or_else(|| Value::String(as_text(content)));
+                messages.push(json!({"role":role,"content":chat_content}));
             }
             "input_text" | "output_text" | "text" => {
                 flush_pending(&mut messages, &mut pending_calls);
                 messages
                     .push(json!({"role":"user","content":as_text(&Value::Object(obj.clone()))}));
             }
-            "input_image" => {
-                flush_pending(&mut messages, &mut pending_calls);
-                let image_url = obj.get("image_url").cloned().unwrap_or_else(|| {
-                    obj.get("url")
-                        .and_then(Value::as_str)
-                        .map(|u| json!(u))
-                        .unwrap_or(Value::Null)
-                });
-                let image_url = if image_url.is_object() {
-                    image_url
-                } else {
-                    json!({"url": image_url})
-                };
-                messages.push(
-                    json!({"role":"user","content":[{"type":"image_url","image_url":image_url}]}),
-                );
+            "input_image" | "image" => {
+                if let Some(part) = image_to_chat_content_part(&Value::Object(obj.clone())) {
+                    flush_pending(&mut messages, &mut pending_calls);
+                    messages.push(json!({"role":"user","content":[part]}));
+                }
             }
             "input_file" => {
-                flush_pending(&mut messages, &mut pending_calls);
-                messages.push(json!({"role":"user","content":[{"type":"file","file":obj.get("file").cloned().unwrap_or_else(|| Value::Object(obj.clone()))}]}));
+                if let Some(part) = file_to_chat_content_part(&Value::Object(obj.clone())) {
+                    flush_pending(&mut messages, &mut pending_calls);
+                    messages.push(json!({"role":"user","content":[part]}));
+                }
             }
             "input_audio" => {
-                flush_pending(&mut messages, &mut pending_calls);
-                messages.push(json!({"role":"user","content":[{"type":"input_audio","input_audio":obj.get("input_audio").cloned().unwrap_or_else(|| Value::Object(obj.clone()))}]}));
+                if let Some(part) = audio_to_chat_content_part(&Value::Object(obj.clone())) {
+                    flush_pending(&mut messages, &mut pending_calls);
+                    messages.push(json!({"role":"user","content":[part]}));
+                }
             }
             _ => {}
         }
