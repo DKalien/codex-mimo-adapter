@@ -120,11 +120,11 @@ fn rust_input_file() {
 }
 
 #[test]
-fn rust_input_file_fallback_to_object() {
+fn rust_input_file_top_level_fields() {
     let body = json!({
         "model": "opencode-go/deepseek-v4-flash",
         "input": [
-            {"type": "input_file", "filename": "report.txt", "content": "text"}
+            {"type": "input_file", "filename": "report.txt", "file_data": "abc"}
         ]
     });
     let (_payload, messages, _reverse, _tool_ctx) =
@@ -132,6 +132,7 @@ fn rust_input_file_fallback_to_object() {
     let content = messages[0]["content"].as_array().unwrap();
     assert_eq!(content[0]["type"], "file");
     assert_eq!(content[0]["file"]["filename"], "report.txt");
+    assert_eq!(content[0]["file"]["file_data"], "abc");
 }
 
 #[test]
