@@ -62,6 +62,121 @@ The implemented Rust equivalents are intentionally narrower:
 The intended compatibility target is the Codex subagent -> OpenCode Go path, not
 a general-purpose provider aggregation platform.
 
+## Current status
+
+This project is in the protocol-compatibility and validation phase.
+
+| Area | Status | Notes |
+|---|---|---|
+| Responses -> Chat request conversion | Implemented | Covers instructions, input history, tool calls, tool outputs, tool choice, reasoning parameters, and multimodal input blocks |
+| Chat -> Responses non-stream conversion | Implemented | Covers text, reasoning, usage, finish reasons, function calls, custom tool calls, tool search calls, and stored replay state |
+| Chat stream -> Responses stream conversion | Implemented | Covers Responses SSE lifecycle, text deltas, reasoning deltas, streamed tool-call assembly, custom tool input finalization, tool search, terminal events, failed streams, and truncated streams |
+| Tool lifecycle and state replay | Implemented | `previous_response_id` and pending tool call IDs are stored locally so tool-result continuations can be repaired |
+| OpenCode Go reasoning compatibility | Implemented for known profiles | DeepSeek V4 and MiMo reasoning variants are handled through explicit metadata/config behavior |
+| Tool search compatibility | Implemented | `tool_search` has a dedicated schema and converts to/from Responses `tool_search_call` instead of being treated as a custom tool |
+| Multimodal input conversion | Implemented | Request-side `input_image`, base64 image source, `input_file`, `input_audio`, and mixed content arrays are converted to Chat-compatible content blocks |
+| Multimodal text-only model guard | Implemented | Known text-only models return a valid Responses `failed` result instead of an HTTP provider error when media input is present |
+| Multimodal output generation | Intentionally out of scope | Image/audio/file generation should be delegated to CLI, MCP, or normal Codex tools |
+| Mock integration tests | Implemented | L2 tests use mock upstream behavior and do not require an external OpenCode Go call |
+| Real OpenCode Go / Codex subagent validation | Pending | Must be verified with a real OpenCode Go API key and a real Codex subagent workflow |
+
+Latest local validation expected after changing this file set:
+
+```bash
+cargo fmt --check
+cargo test --lib
+cargo test --test conversion_rs
+cargo test --test tool_search_regression
+cargo test --test multimodal_regression
+cargo test --test test_e2e
+cargo test
+```
+
+## Roadmap
+
+### P0/P1/P2 protocol migration
+
+Implemented in the current codebase:
+
+- Responses request -> Chat request conversion.
+- Chat non-stream response -> Responses response conversion.
+- Chat SSE stream -> Responses SSE stream conversion.
+- Function tool, namespace tool, custom tool, and tool search conversion.
+- Tool result continuation and `previous_response_id` state replay.
+- Reasoning field extraction and compatibility handling.
+- Usage, finish reason, incomplete, failed, and terminal event mapping.
+- SSE parsing compatibility for LF/CRLF blocks and upstream `event:error` cases.
+
+### P2.5 compatibility hardening
+
+Implemented:
+
+- Tool search schema and lifecycle fixes.
+- Streaming custom/tool search event separation.
+- Custom tool partial argument handling.
+- Upstream stream error translation into Responses failed events.
+- Additional regression tests for custom tool and tool search behavior.
+
+### P2.6 multimodal compatibility
+
+Implemented, but still requires local `cargo fmt` and `cargo test` validation after pull:
+
+- Mixed text/image/file/audio Responses input conversion.
+- Anthropic-style base64 image source -> Chat `image_url` data URL.
+- `input_file` mapping only when a usable `file_id` or `file_data` is present.
+- `input_audio` mapping.
+- Known text-only model guard.
+- Reactive upstream multimodal unsupported error detection.
+- Multimodal regression tests.
+
+### P3-lite real validation
+
+Next planned milestone:
+
+- Start the adapter locally with a real OpenCode Go API key.
+- Verify `/v1/models` and basic `/v1/responses` non-stream requests.
+- Verify `/v1/responses` streaming requests.
+- Verify reasoning output with known DeepSeek/MiMo models.
+- Verify normal function-call round trip.
+- Verify streamed function-call round trip.
+- Verify custom tool-call round trip.
+- Verify tool-search call round trip.
+- Verify `function_call_output` / `custom_tool_call_output` / `tool_search_output` continuation through stored state.
+
+### P3-full Codex subagent validation
+
+After P3-lite passes:
+
+- Configure Codex subagent to call this adapter as `opencode-go/...` models.
+- Run a real text-only subagent task.
+- Run a real tool-using subagent task.
+- Run a real streaming tool-using subagent task.
+- Run a real multimodal input smoke test against a model believed to support vision.
+- Run a real text-only-model multimodal failure test and confirm the parent agent receives a protocol-valid Responses `failed` result rather than a broken provider error.
+- Record exact model IDs and observed OpenCode Go response shapes.
+
+### Stabilization
+
+Only after real validation:
+
+- Patch concrete upstream shape mismatches found in P3.
+- Add regression tests for every real incompatibility found.
+- Tighten model capability metadata only when a model has been verified.
+- Improve diagnostics/logging around failed upstream streams and unsupported media.
+- Keep protocol conversion code small and avoid introducing a provider registry unless a second provider becomes an explicit project goal.
+
+### Explicit non-goals
+
+Not planned for this project:
+
+- Full cc-switch port.
+- Provider aggregation platform.
+- UI, hooks, plugins, statusLine, or OpenCode session management.
+- Automatic model fallback/routing.
+- Automatic multimodal retry after stripping media.
+- Full image/audio/file output generation protocol.
+- Silent multimodal degradation that makes a text-only model pretend it saw media.
+
 ## Quick start (Rust)
 
 ```bash
