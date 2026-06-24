@@ -21,7 +21,10 @@ fn stateless_full_history_tool_output_builds_chat_payload() {
     let chat_messages = payload["messages"].as_array().unwrap();
     assert!(chat_messages.iter().any(|message| {
         message.get("role").and_then(Value::as_str) == Some("assistant")
-            && message.get("tool_calls").and_then(Value::as_array).is_some()
+            && message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .is_some()
     }));
     assert!(chat_messages.iter().any(|message| {
         message.get("role").and_then(Value::as_str) == Some("tool")
@@ -39,7 +42,10 @@ fn stateless_orphan_tool_output_still_fails_without_state() {
         ]
     });
 
-    assert_eq!(function_output_call_ids(&body).unwrap(), vec!["call_1".to_string()]);
+    assert_eq!(
+        function_output_call_ids(&body).unwrap(),
+        vec!["call_1".to_string()]
+    );
 
     let error = build_chat_payload(&body, "test-model", None, json!({}))
         .unwrap_err()
@@ -77,5 +83,8 @@ fn previous_response_id_does_not_bypass_state_lookup_even_with_full_history() {
         ]
     });
 
-    assert_eq!(function_output_call_ids(&body).unwrap(), vec!["call_1".to_string()]);
+    assert_eq!(
+        function_output_call_ids(&body).unwrap(),
+        vec!["call_1".to_string()]
+    );
 }

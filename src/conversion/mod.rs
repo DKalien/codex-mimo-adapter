@@ -55,7 +55,10 @@ fn collect_tool_call_ids(value: &Value, call_ids: &mut HashSet<String>) {
         }
         Value::Object(obj) => {
             let kind = obj.get("type").and_then(Value::as_str).unwrap_or("");
-            if matches!(kind, "function_call" | "custom_tool_call" | "tool_search_call") {
+            if matches!(
+                kind,
+                "function_call" | "custom_tool_call" | "tool_search_call"
+            ) {
                 if let Some(call_id) = obj
                     .get("call_id")
                     .or_else(|| obj.get("id"))
