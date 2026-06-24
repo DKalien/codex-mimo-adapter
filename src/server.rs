@@ -122,7 +122,13 @@ async fn complete_response(state: AppState, body: Value) -> Response {
     let model_upstream = match strip_model_prefix(&model_alias) {
         Ok(model) => model,
         Err(message) => {
-            return responses_failed_response(&body, &model_alias, "invalid_model", message)
+            return responses_failed_response_with_status(
+                StatusCode::BAD_REQUEST,
+                &body,
+                &model_alias,
+                "invalid_model",
+                message,
+            )
         }
     };
     let previous = match previous_response(&state, &body) {
@@ -343,11 +349,13 @@ async fn stream_response(state: AppState, body: Value) -> Response {
                                                         "upstream stream error".to_string()
                                                     });
                                                 let kind = upstream_stream_error_type(&message);
-                                                let display = upstream_stream_error_message(&message);
+                                                let display =
+                                                    upstream_stream_error_message(&message);
                                                 let _ = assembler.fail(kind, &display);
                                                 let _ = tx
-                                                    .send(Ok(axum::response::sse::Event::default()
-                                                        .data("[DONE]")));
+                                                    .send(Ok(axum::response::sse::Event::default(
+                                                    )
+                                                    .data("[DONE]")));
                                                 return;
                                             }
                                             let _ = assembler.accept(&value);
