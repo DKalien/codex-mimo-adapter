@@ -52,10 +52,9 @@ pub fn is_known_text_only_model(model: &str) -> bool {
     ) {
         return false;
     }
-    matches!(
-        normalized.as_str(),
-        "deepseek-v4-pro" | "deepseek-v4-flash" | "deepseek-v3" | "deepseek-r1"
-    )
+    matches!(normalized.as_str(), "deepseek-v3" | "deepseek-r1")
+        || normalized.contains("deepseek-v4-pro")
+        || normalized.contains("deepseek-v4-flash")
 }
 
 pub fn is_multimodal_unsupported_error(message: &str) -> bool {
@@ -107,7 +106,8 @@ fn scan_value(value: &Value, usage: &mut MultimodalUsage) {
 }
 
 fn normalize_model(model: &str) -> String {
-    model.trim()
+    model
+        .trim()
         .trim_start_matches("opencode-go/")
         .to_ascii_lowercase()
 }
