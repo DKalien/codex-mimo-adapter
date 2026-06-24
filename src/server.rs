@@ -60,7 +60,11 @@ async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
                 .unwrap_or_default();
             let data = rows
                 .into_iter()
-                .filter_map(|row| row.get("id").and_then(Value::as_str).map(|id| json!({"id":format!("opencode-go/{id}"),"object":"model","owned_by":"opencode-go"})))
+                .filter_map(|row| {
+                    row.get("id").and_then(Value::as_str).map(|id| {
+                        json!({"id":format!("opencode-go/{id}"),"object":"model","owned_by":"opencode-go"})
+                    })
+                })
                 .collect::<Vec<_>>();
             Json(json!({"object":"list","data":data})).into_response()
         }
@@ -166,6 +170,7 @@ async fn complete_response(state: AppState, body: Value) -> Response {
     let upstream = match upstream {
         Ok(value) => value,
         Err(error) => {
+            let status = upstream_http_status(&error);
             let message = error.to_string();
             if is_multimodal_unsupported_error(&message) {
                 return responses_failed_response(
@@ -175,7 +180,13 @@ async fn complete_response(state: AppState, body: Value) -> Response {
                     unsupported_multimodal_error_message(),
                 );
             }
-            return upstream_error(error);
+            return responses_failed_response_with_status(
+                status,
+                &body,
+                &model_alias,
+                "upstream_error",
+                &message,
+            );
         }
     };
     match build_response(
@@ -467,6 +478,16 @@ fn responses_failed_response(body: &Value, model: &str, kind: &str, message: &st
     Json(responses_failed_value(body, model, kind, message)).into_response()
 }
 
+fn responses_failed_response_with_status(
+    status: StatusCode,
+    body: &Value,
+    model: &str,
+    kind: &str,
+    message: &str,
+) -> Response {
+    (status, Json(responses_failed_value(body, model, kind, message))).into_response()
+}
+
 fn responses_failed_value(body: &Value, model: &str, kind: &str, message: &str) -> Value {
     json!({
         "id": format!("resp_{}", Uuid::new_v4().simple()),
@@ -566,6 +587,15 @@ fn upstream_stream_error_message(message: &str) -> String {
         unsupported_multimodal_error_message().to_string()
     } else {
         message.to_string()
+    }
+}
+
+fn upstream_http_status(error: &UpstreamError) -> StatusCode {
+    match error {
+        UpstreamError::Http { status, .. } => {
+            StatusCode::from_u16(*status).unwrap_or(StatusCode::BAD_GATEWAY)
+        }
+        UpstreamError::Network(_) | UpstreamError::Invalid(_) => StatusCode::BAD_GATEWAY,
     }
 }
 
