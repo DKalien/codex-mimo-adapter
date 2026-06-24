@@ -19,7 +19,13 @@ fn streaming_function_tool_accepts_split_id_name_and_arguments() {
         .accept(&stream_tool_chunk(0, Some("call_run"), None, None, None))
         .unwrap();
     assembler
-        .accept(&stream_tool_chunk(0, None, Some("run"), Some("{\"cmd\":"), None))
+        .accept(&stream_tool_chunk(
+            0,
+            None,
+            Some("run"),
+            Some("{\"cmd\":"),
+            None,
+        ))
         .unwrap();
     assembler
         .accept(&stream_tool_chunk(
@@ -277,7 +283,8 @@ fn streaming_tool_call_without_name_is_skipped_and_does_not_pollute_state() {
 
     let events = events.lock().unwrap();
     assert!(!events.iter().any(|(name, data)| {
-        name == "response.output_item.added" && data["item"]["type"].as_str() == Some("function_call")
+        name == "response.output_item.added"
+            && data["item"]["type"].as_str() == Some("function_call")
     }));
 }
 
@@ -338,7 +345,10 @@ fn stream_tool_chunk(
     call.insert("function".to_string(), Value::Object(function));
 
     let mut delta = Map::new();
-    delta.insert("tool_calls".to_string(), Value::Array(vec![Value::Object(call)]));
+    delta.insert(
+        "tool_calls".to_string(),
+        Value::Array(vec![Value::Object(call)]),
+    );
 
     let mut choice = Map::new();
     choice.insert("delta".to_string(), Value::Object(delta));
