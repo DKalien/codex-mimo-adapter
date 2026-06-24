@@ -303,6 +303,15 @@ impl StreamAssembler {
                 .unwrap_or("")
                 .to_string(),
         })?;
+        if !pending.is_empty() {
+            tracing::debug!(
+                event = "tool_call_pending_stored",
+                response_id = %self.response_id,
+                pending_call_ids = ?pending,
+                stream = true,
+                "stored pending streaming tool calls for continuation"
+            );
+        }
         let finish_value = self
             .finish_reason
             .as_ref()
@@ -372,7 +381,9 @@ impl StreamAssembler {
         self.emit_event(
             "response.output_item.added",
             json!({"type":"response.output_item.added","output_index":output_index,"item":item}),
-        )
+        )?;
+        self.trace_tool_emitted(output_index, &call_id, &raw_name);
+        Ok(())
     }
 
     fn disable_leading_think_detection(&mut self) -> anyhow::Result<()> {
@@ -691,7 +702,27 @@ impl StreamAssembler {
         self.next_output_index += 1;
         value
     }
-
+    fn trace_tool_emitted(&self, output_index: u32, call_id: &str, chat_name: &str) {
+        let tool_kind = match self
+            .tool_context
+            .lookup_spec(chat_name)
+            .map(|spec| &spec.kind)
+        {
+            Some(ToolKind::Custom) => "custom_tool_call",
+            Some(ToolKind::ToolSearch) => "tool_search_call",
+            _ => "function_call",
+        };
+        tracing::debug!(
+            event = "tool_call_emitted",
+            response_id = %self.response_id,
+            call_id,
+            tool_name = chat_name,
+            tool_kind,
+            stream = true,
+            output_index,
+            "streaming tool call emitted from upstream response"
+        );
+    }
     fn emit_event(&mut self, event: &str, mut payload: Value) -> anyhow::Result<()> {
         self.sequence += 1;
         payload["response_id"] = Value::String(self.response_id.clone());
