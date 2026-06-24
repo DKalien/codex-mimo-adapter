@@ -47,10 +47,34 @@ pub fn build_chat_payload(
 ) -> Result<ChatPayload, HistoryError> {
     let context = ToolContext::build_with_input(body.get("tools"), body.get("input"));
     let (incoming, outputs) = extract_request_with_context(body, &context)?;
+    let output_call_ids = outputs
+        .iter()
+        .filter_map(|output| {
+            output
+                .get("tool_call_id")
+                .or_else(|| output.get("call_id"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        })
+        .collect::<Vec<_>>();
     let mut messages = if !outputs.is_empty() {
-        let previous = previous.ok_or_else(|| {
-            HistoryError::Invalid("tool output has no matching stored response".to_string())
-        })?;
+        let Some(previous) = previous else {
+            tracing::debug!(
+                event = "tool_output_orphan",
+                call_ids = ?output_call_ids,
+                "tool outputs have no matching stored response"
+            );
+            return Err(HistoryError::Invalid(
+                "tool output has no matching stored response".to_string(),
+            ));
+        };
+        tracing::debug!(
+            event = "tool_output_adopted",
+            previous_response_id = %previous.response_id,
+            call_ids = ?output_call_ids,
+            pending_call_ids = ?previous.pending_call_ids,
+            "tool outputs matched stored response"
+        );
         let repaired = repair_history(&previous.messages, Some(&outputs))?;
         merge_new_messages(&repaired, &incoming)
     } else if let Some(previous) = previous {
@@ -190,6 +214,12 @@ fn extract_request_with_context(
                 if call_id.is_empty() {
                     return Err(HistoryError::Invalid(format!("{kind} requires call_id")));
                 }
+                tracing::debug!(
+                    event = "tool_output_seen",
+                    call_id,
+                    output_kind = kind,
+                    "tool output item received in Responses input"
+                );
                 flush_pending(&mut messages, &mut pending_calls);
                 let content = if kind == "function_call_output" {
                     let empty = Value::String(String::new());
@@ -219,6 +249,14 @@ fn extract_request_with_context(
                     name,
                     obj.get("namespace").and_then(Value::as_str),
                 );
+                tracing::debug!(
+                    event = "tool_call_replayed",
+                    call_id = %call_id,
+                    tool_name = name,
+                    chat_name = %chat_name,
+                    tool_kind = "function_call",
+                    "tool call item replayed from Responses input"
+                );
                 pending_calls.push(json!({
                     "id": call_id,
                     "type":"function",
@@ -241,11 +279,20 @@ fn extract_request_with_context(
                     continue;
                 }
                 let input = obj.get("input").cloned().unwrap_or_else(|| json!(""));
+                let chat_name = context.chat_name_for_response_function(name, None);
+                tracing::debug!(
+                    event = "tool_call_replayed",
+                    call_id = %call_id,
+                    tool_name = name,
+                    chat_name = %chat_name,
+                    tool_kind = "custom_tool_call",
+                    "custom tool call item replayed from Responses input"
+                );
                 pending_calls.push(json!({
                     "id": call_id,
                     "type":"function",
                     "function":{
-                        "name": context.chat_name_for_response_function(name, None),
+                        "name": chat_name,
                         "arguments": compact_json(&json!({ custom_tool_input_field(): input })),
                     }
                 }));
@@ -261,6 +308,13 @@ fn extract_request_with_context(
                     .get("arguments")
                     .map(compact_json)
                     .unwrap_or_else(|| "{}".to_string());
+                tracing::debug!(
+                    event = "tool_call_replayed",
+                    call_id = %call_id,
+                    tool_name = "tool_search",
+                    tool_kind = "tool_search_call",
+                    "tool search call item replayed from Responses input"
+                );
                 pending_calls.push(json!({
                     "id": call_id,
                     "type":"function",
@@ -404,6 +458,11 @@ pub fn repair_history(
                 "tool output requires tool_call_id".to_string(),
             ));
         }
+        tracing::debug!(
+            event = "tool_output_replayed",
+            call_id,
+            "tool output appended to repaired chat history"
+        );
         repaired.push(output.clone());
     }
 
