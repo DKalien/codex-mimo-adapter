@@ -76,7 +76,8 @@ This project is in the protocol-compatibility and validation phase.
 | Tool search compatibility | Implemented | `tool_search` has a dedicated schema and converts to/from Responses `tool_search_call` instead of being treated as a custom tool |
 | Multimodal input conversion | Implemented | Request-side `input_image`, base64 image source, `input_file`, `input_audio`, and mixed content arrays are converted to Chat-compatible content blocks |
 | Multimodal text-only model guard | Implemented | Known text-only models return a valid Responses `failed` result instead of an HTTP provider error when media input is present |
-| Multimodal output generation | Intentionally out of scope | Image/audio/file generation should be delegated to CLI, MCP, or normal Codex tools |
+| Multimodal output generation | Planned | Current phase keeps text output reliable; image/audio/file output mapping is planned for later phases |
+| Other upstream providers | Planned | Current default target is OpenCode Go; future work may add additional OpenAI-compatible or Chat-like upstream profiles without turning this into a provider aggregation platform |
 | Mock integration tests | Implemented | L2 tests use mock upstream behavior and do not require an external OpenCode Go call |
 | Real OpenCode Go / Codex subagent validation | Pending | Must be verified with a real OpenCode Go API key and a real Codex subagent workflow |
 
@@ -155,6 +156,36 @@ After P3-lite passes:
 - Run a real text-only-model multimodal failure test and confirm the parent agent receives a protocol-valid Responses `failed` result rather than a broken provider error.
 - Record exact model IDs and observed OpenCode Go response shapes.
 
+### Long-term multimodal output support
+
+Planned after the text/tool/reasoning path is stable against real Codex subagent
+traffic:
+
+- Preserve Chat response content arrays instead of flattening all non-text output to plain text.
+- Map upstream image/file/audio output blocks to valid Responses output items when the upstream provides a stable shape.
+- Add streaming event support for non-text output parts only after a real upstream format is observed.
+- Keep generated image/audio/file artifacts out of adapter-owned state unless Codex requires protocol-level references.
+- Prefer external CLI, MCP, or Codex tools for actual media generation/extraction work; the adapter should translate protocol metadata, not become a media runtime.
+- Add regression tests for every verified multimodal output shape.
+
+### Long-term additional upstream support
+
+Planned after OpenCode Go is validated:
+
+- Add a small provider/profile boundary for upstreams that are mostly OpenAI Chat Completions-compatible.
+- Keep Codex Responses as the stable frontend contract.
+- Add provider-specific request/response quirks only when a real model/API requires them.
+- Start with configuration/profile differences such as base URL, headers, model IDs, reasoning fields, stream usage, tool-call shape, and error shape.
+- Introduce a dedicated provider adapter trait only if a second upstream cannot be handled by profile-level differences.
+- Add one upstream at a time with mock tests plus real smoke tests.
+- Avoid provider aggregation features such as automatic routing, fallback, price optimization, UI management, or model marketplace behavior.
+
+Candidate future upstream categories:
+
+- OpenAI-compatible Chat Completions APIs.
+- Chat-like APIs with small schema differences.
+- Responses-compatible APIs that can bypass some conversion steps.
+
 ### Stabilization
 
 Only after real validation:
@@ -174,7 +205,6 @@ Not planned for this project:
 - UI, hooks, plugins, statusLine, or OpenCode session management.
 - Automatic model fallback/routing.
 - Automatic multimodal retry after stripping media.
-- Full image/audio/file output generation protocol.
 - Silent multimodal degradation that makes a text-only model pretend it saw media.
 
 ## Quick start (Rust)
@@ -287,9 +317,10 @@ Unknown model capabilities are passed through to OpenCode Go. If the upstream
 returns a multimodal unsupported error, the adapter translates it into the same
 Responses-level failure.
 
-Multimodal output generation is intentionally out of scope for this adapter.
-Image/audio/file generation should be handled by external CLI tools, MCP tools,
-or normal Codex tool calls; this adapter only preserves the protocol chain.
+Multimodal output generation is planned as future work. Until the output shape
+is validated against a real upstream, image/audio/file generation should be
+handled by external CLI tools, MCP tools, or normal Codex tool calls; this
+adapter preserves the protocol chain.
 
 ## Supported models
 
