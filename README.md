@@ -20,26 +20,35 @@ Codex subagent
 
 Codex remains responsible for task roles, sandbox permissions, tool execution, review, and deciding whether work is complete.
 
-## Documentation
+## Self-use Quick Start
 
-| File | Purpose |
-|---|---|
-| [docs/USAGE.zh-CN.md](docs/USAGE.zh-CN.md) | Chinese setup, usage, and low-token troubleshooting guide. |
-| [docs/VALIDATION.zh-CN.md](docs/VALIDATION.zh-CN.md) | Real OpenCode Go and Codex validation checklist. |
-| [docs/REAL_VALIDATION_2026-06-25.zh-CN.md](docs/REAL_VALIDATION_2026-06-25.zh-CN.md) | Recorded real upstream and Codex subagent validation results from 2026-06-25. |
-| [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) | Runtime diagnostics and log interpretation. |
-| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Compatibility scope, references, implementation map, and non-goals. |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Current status, known gaps, and validation roadmap. |
+Start the adapter:
 
-## Quick start
-
-```bash
+```powershell
 cargo build --release
 
-OPENCODE_GO_API_KEY="your-key" \
-CODEX_OPENCODE_LOCAL_TOKEN="your-local-token" \
-cargo run
+$env:OPENCODE_GO_API_KEY = "<your-key>"
+$env:CODEX_OPENCODE_LOCAL_TOKEN = "codex-opencode-local"
+$env:CODEX_OPENCODE_PORT = "4010"
+cargo run --release
 ```
+
+Sanity check it:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:4010/health
+
+$headers = @{ Authorization = "Bearer codex-opencode-local" }
+(Invoke-RestMethod http://127.0.0.1:4010/v1/models -Headers $headers).data.id
+```
+
+Run the real smoke suite when needed:
+
+```powershell
+./scripts/run-real-smoke.ps1 -ApiKey "<your-key>"
+```
+
+If you only need one doc, start with [docs/USAGE.zh-CN.md](docs/USAGE.zh-CN.md). Real validation results are in [docs/REAL_VALIDATION_2026-06-25.zh-CN.md](docs/REAL_VALIDATION_2026-06-25.zh-CN.md).
 
 ## Environment variables
 
@@ -65,42 +74,34 @@ The upstream API key and local client token must be different. The adapter never
 - `GET /v1/models` — List available models with the `opencode-go/` prefix.
 - `GET /health` — Health check.
 
-## Run tests
+## Tests
 
 ```bash
-cargo fmt --check
-cargo test --lib
-cargo test --test conversion_rs
-cargo test --test stateless_tool_continuation
-cargo test --test stream_content_tool_buffer
-cargo test --test stream_tool_delta_regression
-cargo test --test nonstream_upstream_error_regression
-cargo test --test tool_search_regression
-cargo test --test multimodal_regression
-cargo test --test test_e2e
 cargo test
 ```
 
-Real smoke test, requires `OPENCODE_GO_API_KEY`:
+Real upstream smoke:
 
 ```bash
 OPENCODE_GO_API_KEY="your-key" cargo test --test test_e2e test_e2e_real_validation_suite -- --ignored --nocapture
 ```
 
-PowerShell helper for the full real smoke suite:
-
-```powershell
-./scripts/run-real-smoke.ps1 `
-  -ApiKey "your-key" `
-  -TextModel "opencode-go/deepseek-v4-flash" `
-  -VisionModel "opencode-go/mimo-v2.5"
-```
-
 ## Current status
 
-The text, tool, reasoning, stream, multimodal-input guard, and state-continuation paths are covered by mock/regression tests. Real OpenCode Go validation and Codex subagent smoke validation have also been completed; the next step is keeping that coverage repeatable via the scripted smoke suite above.
+The adapter is usable for self-hosted Codex subagent routing. Text, stream, tool call, custom tool, tool search, continuation, and multimodal guard paths have mock coverage, and real OpenCode Go smoke validation has been run against the current setup.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for status and next milestones.
+
+## More Docs
+
+| File | Purpose |
+|---|---|
+| [docs/USAGE.zh-CN.md](docs/USAGE.zh-CN.md) | Short self-use setup and troubleshooting guide. |
+| [docs/REAL_VALIDATION_2026-06-25.zh-CN.md](docs/REAL_VALIDATION_2026-06-25.zh-CN.md) | Latest real upstream and Codex subagent validation record. |
+| [docs/VALIDATION.zh-CN.md](docs/VALIDATION.zh-CN.md) | Full manual validation checklist. |
+| [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) | Runtime diagnostics and log interpretation. |
+| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Compatibility scope and non-goals. |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Current status and future ideas. |
 
 ## Explicit non-goals
 

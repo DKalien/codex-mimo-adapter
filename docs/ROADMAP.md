@@ -69,7 +69,7 @@ These should stay on the watch list before expanding the adapter further:
 Priority next step:
 
 - Keep real upstream smoke coverage easy to rerun through `scripts/run-real-smoke.ps1`.
-- Expand the real smoke suite from text/stream/function-call/continuation/multimodal basics to reasoning, streamed tool calls, custom tools, and tool search.
+- Expand the real smoke suite further into explicit reasoning-model coverage and any model-specific quirks beyond the now-covered text/stream/function-call/custom-tool/tool-search/multimodal basics.
 - Decide whether some of those real checks should stay as ignored Rust tests or move into a separate manual/CI smoke layer.
 
 Detailed validation steps are in `docs/VALIDATION.zh-CN.md`, and the latest executed results are in `docs/REAL_VALIDATION_2026-06-25.zh-CN.md`.

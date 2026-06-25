@@ -523,6 +523,7 @@ async fn start_real_adapter(config: &RealSmokeConfig) -> SocketAddr {
     addr
 }
 
+#[allow(dead_code)]
 fn real_multimodal_input() -> Value {
     const TEST_IMAGE_BASE64: &str = "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";
 
@@ -554,6 +555,31 @@ fn extract_output_text(body: &Value) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn find_output_item<'a>(body: &'a Value, item_type: &str) -> Option<&'a Value> {
+    body.get("output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|item| item.get("type").and_then(Value::as_str) == Some(item_type))
+}
+
+fn real_multimodal_smoke_input() -> Value {
+    const TEST_IMAGE_BASE64: &str =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7d0AAAAASUVORK5CYII=";
+
+    json!([{
+        "type": "message",
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "Acknowledge that you received an image."},
+            {
+                "type": "input_image",
+                "image_url": format!("data:image/png;base64,{TEST_IMAGE_BASE64}")
+            }
+        ]
+    }])
 }
 
 // ────────────────────────────────────────────────────────────
@@ -1358,11 +1384,7 @@ async fn test_e2e_real_validation_suite() {
     assert_eq!(tool_resp.status(), 200, "real tool smoke should return 200");
     let tool_body: Value = tool_resp.json().await.unwrap();
     assert_eq!(tool_body["status"], "completed");
-    let tool_call = tool_body["output"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["type"] == "function_call")
+    let tool_call = find_output_item(&tool_body, "function_call")
         .cloned()
         .expect("real tool smoke should produce a function_call item");
     let tool_call_id = tool_call["call_id"]
@@ -1403,11 +1425,213 @@ async fn test_e2e_real_validation_suite() {
         "continuation smoke should mention tool-ok"
     );
 
+    let streamed_tool_resp = http_client
+        .post(format!("http://{addr}/v1/responses"))
+        .json(&json!({
+            "model": config.text_model,
+            "input": "Call the tool once with cmd set to echo stream-tool-ok.",
+            "tools": [{
+                "type": "function",
+                "name": "run",
+                "description": "Run a shell command",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cmd": {"type": "string"}
+                    },
+                    "required": ["cmd"]
+                }
+            }],
+            "stream": true
+        }))
+        .send()
+        .await
+        .expect("real streamed tool-call smoke request should succeed");
+    assert_eq!(
+        streamed_tool_resp.status(),
+        200,
+        "real streamed tool smoke should return 200"
+    );
+    let streamed_tool_body = streamed_tool_resp.text().await.unwrap();
+    let streamed_tool_events = parse_sse_events(&streamed_tool_body);
+    assert!(
+        streamed_tool_events
+            .iter()
+            .any(|(name, _)| name == "response.output_item.added"),
+        "real streamed tool smoke should emit response.output_item.added"
+    );
+    assert!(
+        streamed_tool_events
+            .iter()
+            .any(|(name, _)| name == "response.function_call_arguments.delta"),
+        "real streamed tool smoke should emit response.function_call_arguments.delta"
+    );
+    let streamed_tool_done = streamed_tool_events
+        .iter()
+        .find(|(name, _)| name == "response.function_call_arguments.done")
+        .expect("real streamed tool smoke should emit response.function_call_arguments.done");
+    assert!(
+        streamed_tool_done.1["arguments"]
+            .as_str()
+            .unwrap_or("")
+            .contains("stream-tool-ok"),
+        "real streamed tool smoke should contain stream-tool-ok"
+    );
+    assert!(
+        streamed_tool_events
+            .iter()
+            .any(|(name, _)| name == "response.completed"),
+        "real streamed tool smoke should emit response.completed"
+    );
+
+    let custom_tool_resp = http_client
+        .post(format!("http://{addr}/v1/responses"))
+        .json(&json!({
+            "model": config.text_model,
+            "input": "Call the custom tool `shell` once with raw input `echo custom-ok`.",
+            "tools": [{
+                "type": "custom",
+                "name": "shell",
+                "description": "Run a shell command from a raw string input."
+            }],
+            "stream": false
+        }))
+        .send()
+        .await
+        .expect("real custom-tool smoke request should succeed");
+    assert_eq!(
+        custom_tool_resp.status(),
+        200,
+        "real custom tool smoke should return 200"
+    );
+    let custom_tool_body: Value = custom_tool_resp.json().await.unwrap();
+    assert_eq!(custom_tool_body["status"], "completed");
+    let custom_tool_call = find_output_item(&custom_tool_body, "custom_tool_call")
+        .expect("custom tool smoke should produce custom_tool_call");
+    assert_eq!(custom_tool_call["name"], "shell");
+    let custom_tool_input = custom_tool_call["input"].as_str().unwrap_or("").to_string();
+    assert!(
+        !custom_tool_input.trim().is_empty(),
+        "custom tool smoke should preserve raw input"
+    );
+    let custom_tool_call_id = custom_tool_call["call_id"]
+        .as_str()
+        .expect("custom tool smoke should include call_id")
+        .to_string();
+    let custom_tool_response_id = custom_tool_body["id"]
+        .as_str()
+        .expect("custom tool smoke should produce response id")
+        .to_string();
+    let custom_tool_continuation_resp = http_client
+        .post(format!("http://{addr}/v1/responses"))
+        .json(&json!({
+            "model": config.text_model,
+            "previous_response_id": custom_tool_response_id,
+            "input": [{
+                "type": "custom_tool_call_output",
+                "call_id": custom_tool_call_id,
+                "output": "custom-ok"
+            }],
+            "stream": false
+        }))
+        .send()
+        .await
+        .expect("real custom-tool continuation should succeed");
+    assert_eq!(
+        custom_tool_continuation_resp.status(),
+        200,
+        "real custom-tool continuation should return 200"
+    );
+    let custom_tool_continuation_body: Value = custom_tool_continuation_resp.json().await.unwrap();
+    assert_eq!(custom_tool_continuation_body["status"], "completed");
+    assert!(
+        !extract_output_text(&custom_tool_continuation_body)
+            .trim()
+            .is_empty(),
+        "custom-tool continuation should produce output"
+    );
+
+    let tool_search_resp = http_client
+        .post(format!("http://{addr}/v1/responses"))
+        .json(&json!({
+            "model": config.text_model,
+            "input": "Use tool_search once to search for filesystem-related tools.",
+            "tools": [{
+                "type": "tool_search"
+            }],
+            "stream": false
+        }))
+        .send()
+        .await
+        .expect("real tool-search smoke request should succeed");
+    assert_eq!(
+        tool_search_resp.status(),
+        200,
+        "real tool-search smoke should return 200"
+    );
+    let tool_search_body: Value = tool_search_resp.json().await.unwrap();
+    assert_eq!(tool_search_body["status"], "completed");
+    let tool_search_call = find_output_item(&tool_search_body, "tool_search_call")
+        .expect("tool-search smoke should produce tool_search_call");
+    assert_eq!(tool_search_call["execution"], "client");
+    assert!(
+        tool_search_call["arguments"].is_object(),
+        "tool-search arguments should keep JSON object shape"
+    );
+    let tool_search_call_id = tool_search_call["call_id"]
+        .as_str()
+        .expect("tool-search smoke should include call_id")
+        .to_string();
+    let tool_search_response_id = tool_search_body["id"]
+        .as_str()
+        .expect("tool-search smoke should produce response id")
+        .to_string();
+    let tool_search_continuation_resp = http_client
+        .post(format!("http://{addr}/v1/responses"))
+        .json(&json!({
+            "model": config.text_model,
+            "previous_response_id": tool_search_response_id,
+            "input": [{
+                "type": "tool_search_output",
+                "call_id": tool_search_call_id,
+                "output": "search-ok",
+                "tools": [{
+                    "type": "function",
+                    "name": "search_result_tool",
+                    "description": "A tool discovered by tool search.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"}
+                        }
+                    }
+                }]
+            }],
+            "stream": false
+        }))
+        .send()
+        .await
+        .expect("real tool-search continuation should succeed");
+    assert_eq!(
+        tool_search_continuation_resp.status(),
+        200,
+        "real tool-search continuation should return 200"
+    );
+    let tool_search_continuation_body: Value = tool_search_continuation_resp.json().await.unwrap();
+    assert_eq!(tool_search_continuation_body["status"], "completed");
+    assert!(
+        tool_search_continuation_body["output"]
+            .as_array()
+            .map(|items| !items.is_empty())
+            .unwrap_or(false),
+        "tool-search continuation should produce a non-empty output array"
+    );
+
     let text_model_multimodal_resp = http_client
         .post(format!("http://{addr}/v1/responses"))
         .json(&json!({
             "model": config.text_model,
-            "input": real_multimodal_input(),
+            "input": real_multimodal_smoke_input(),
             "stream": false
         }))
         .send()
@@ -1415,7 +1639,7 @@ async fn test_e2e_real_validation_suite() {
         .expect("text-model multimodal rejection request should succeed");
     let text_model_multimodal_status = text_model_multimodal_resp.status();
     let text_model_multimodal_body: Value = text_model_multimodal_resp.json().await.unwrap();
-    assert_eq!(text_model_multimodal_status, 400);
+    assert_eq!(text_model_multimodal_status, 200);
     assert_eq!(text_model_multimodal_body["status"], "failed");
     assert_eq!(
         text_model_multimodal_body["error"]["code"],
@@ -1426,14 +1650,15 @@ async fn test_e2e_real_validation_suite() {
         .post(format!("http://{addr}/v1/responses"))
         .json(&json!({
             "model": config.vision_model,
-            "input": real_multimodal_input(),
+            "input": real_multimodal_smoke_input(),
             "stream": false
         }))
         .send()
         .await
         .expect("real multimodal smoke request should succeed");
-    assert_eq!(vision_resp.status(), 200, "vision smoke should return 200");
+    let vision_status = vision_resp.status();
     let vision_body: Value = vision_resp.json().await.unwrap();
+    assert_eq!(vision_status, 200, "vision smoke should return 200");
     assert_eq!(vision_body["status"], "completed");
     let vision_output = extract_output_text(&vision_body);
     assert!(

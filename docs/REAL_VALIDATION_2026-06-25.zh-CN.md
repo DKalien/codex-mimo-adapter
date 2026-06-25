@@ -101,6 +101,7 @@
 观察：
 
 - 当请求包含 `input_image` 时，adapter 在本地直接返回协议级失败
+- 这次重跑观察到的 HTTP status 为 `200`
 - 返回：
   - `status = failed`
   - `error.type = unsupported_multimodal_input`
@@ -230,6 +231,40 @@
 结论：
 
 - 流式工具调用组装链路已真实验证通过
+
+### 10. 非流式 custom tool
+
+模型：`opencode-go/deepseek-v4-flash`
+
+结果：通过
+
+观察：
+
+- 输出中正确出现 `custom_tool_call`
+- `name = shell`
+- `input` 保持原始字符串输入形态
+- 后续 `custom_tool_call_output` + `previous_response_id` 续传可以完成
+
+结论：
+
+- custom tool 主链路和续传链路已真实验证通过
+
+### 11. 非流式 tool search
+
+模型：`opencode-go/deepseek-v4-flash`
+
+结果：通过
+
+观察：
+
+- 输出中正确出现 `tool_search_call`
+- `arguments` 仍保持 JSON object shape
+- `tool_search_output` + `previous_response_id` 续传可以完成
+- 续传后的结果不一定直接回纯文本，也可能继续进入后续工具决策
+
+结论：
+
+- tool search 主链路和续传链路已真实验证通过
 
 ## 本次验证中确认的行为
 

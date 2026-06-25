@@ -6,6 +6,37 @@
 
 完整文档入口见 [INDEX.md](INDEX.md)。真实验证手册见 [VALIDATION.zh-CN.md](VALIDATION.zh-CN.md)。
 
+## 最短自用流程
+
+如果你只是自己日常用，先看这 4 步就够了：
+
+1. 在用户级 `C:\Users\<用户名>\.codex\config.toml` 配好 `model_providers.opencode_go_adapter`。
+2. 在仓库根目录启动 bridge：
+
+```powershell
+cargo build --release
+$env:OPENCODE_GO_API_KEY = "<你的 OpenCode Go API Key>"
+$env:CODEX_OPENCODE_LOCAL_TOKEN = "codex-opencode-local"
+$env:CODEX_OPENCODE_PORT = "4010"
+cargo run --release
+```
+
+3. 先做免费检查：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:4010/health
+$headers = @{ Authorization = "Bearer codex-opencode-local" }
+(Invoke-RestMethod http://127.0.0.1:4010/v1/models -Headers $headers).data.id
+```
+
+4. 需要时再跑一次真实 smoke：
+
+```powershell
+./scripts/run-real-smoke.ps1 -ApiKey "<你的 OpenCode Go API Key>"
+```
+
+如果这 4 步都正常，就直接进入真实使用；不要为了自用项目先把流程做得太重。
+
 ## 1. 配置分层
 
 | 配置 | 正确位置 | 作用 |
