@@ -18,6 +18,7 @@
 - adapter 本地地址：`http://127.0.0.1:4010`
 - 本地鉴权：`Bearer codex-opencode-local`
 - 并发限制：`CODEX_OPENCODE_MAX_CONCURRENCY=1`
+- 说明：这是当次真实验证时的人工测试配置，不代表适配器默认只能单并发；当前默认值是 `8`。
 - 日志级别：`RUST_LOG=codex_opencode_adapter=debug`
 
 ## 本次使用模型

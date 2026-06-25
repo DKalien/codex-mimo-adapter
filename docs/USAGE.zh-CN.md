@@ -37,6 +37,13 @@ cargo run -- start
 
 如果这 3 步都正常，就直接进入真实使用；不要为了自用项目先把流程做得太重。
 
+对日常本地项目，核心命令就是：
+
+- `codex-opencode-adapter init`
+- `codex-opencode-adapter run` 或 `codex-opencode-adapter start`
+
+`check` 主要用于排障，`auth print-local-token` 主要给 provider auth helper 调用，不是日常手工入口。
+
 ## 1. 配置分层
 
 | 配置 | 正确位置 | 作用 |
@@ -105,6 +112,7 @@ cargo run -- start
 - 默认端口为 `4010`。
 - Bridge 必须保持运行，Codex 子代理才能连接。
 - `CODEX_OPENCODE_MAX_CONCURRENCY` 是最大并发数，默认 `8`，可手动改 `.codex-opencode-adapter.env`。
+- 如果看到 `adapter concurrency limit reached`，优先检查这里是不是被手动改小了，或当前并发请求数是否已经打满；不要先归因给模型厂商。
 
 ## 4. 免费检查
 

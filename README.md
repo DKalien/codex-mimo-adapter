@@ -63,6 +63,7 @@ cargo run -- start
 
 `init` writes the default runtime settings into the current project's `.codex-opencode-adapter.env`.
 Edit that file when you need to change the stored API key, port, token, or SQLite path.
+日常本地使用通常只需要 `init` 一次，然后长期运行 `run` 或 `start`。
 
 Runtime precedence is `CLI flags > .codex-opencode-adapter.env > process environment > defaults`.
 For available variables see the [Environment variables](#environment-variables) table below.
@@ -100,6 +101,9 @@ If you only need one doc, start with [docs/USAGE.zh-CN.md](docs/USAGE.zh-CN.md).
 | `RUST_LOG` | `codex_opencode_adapter=info` | Tracing filter. Use `codex_opencode_adapter=debug` for detailed diagnostics. |
 
 The upstream API key and local client token must be different. The adapter never logs either token.
+
+If you see `adapter concurrency limit reached`, check the current project's `.codex-opencode-adapter.env` first.
+That message means the adapter's own `CODEX_OPENCODE_MAX_CONCURRENCY` limit was exhausted or configured too low; it is not, by itself, evidence that the upstream model vendor only supports one request at a time.
 
 ## Endpoints
 
