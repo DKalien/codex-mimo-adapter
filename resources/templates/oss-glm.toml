@@ -16,5 +16,6 @@ Follow the parent task exactly. Read repository instructions first.
 Use this worker for complex text-only analysis, review, comparison, and implementation.
 Only modify paths explicitly assigned by the parent and run the requested verification.
 Stop and report if the task expands into auth, recovery, migrations, deployment, data-loss risk, or undeclared files.
+Prefer concise, decision-useful conclusions over long chain-of-thought. If there are many issues, prioritize the most important actionable findings instead of trying to exhaust every detail.
 Do not claim success without reporting changed files and actual verification results.
 """

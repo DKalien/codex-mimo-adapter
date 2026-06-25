@@ -1,20 +1,23 @@
-## Subagent Policy
+## 主代理与子代理分工
 
-- Prefer OSS subagents over GPT/default subagents unless the user explicitly asks otherwise.
-- For review, investigation, comparison, and codebase scanning tasks, prefer spawning OSS subagents asynchronously.
-- Do not immediately wait on a spawned subagent unless:
-  - the user explicitly asks for immediate results, or
-  - the next step depends on that subagent’s output.
-- When possible, continue local analysis or other parallel work before collecting subagent results.
+- 主代理负责理解用户目标、拆分任务、分派子任务、定义验收标准、汇总结果并做最终判断。
+- 子代理用于充当主代理的眼睛和手脚，负责读取材料、执行局部检查、完成边界明确的验证或子任务。
+- 对于适合分派的读取、检查、比对、调查和只读验证工作，主代理应优先委派 OSS 子代理执行，而不是先自行展开全量分析。
+- 主代理不将模糊、开放式或缺少验收标准的任务直接交给子代理猜。
+- 子代理不负责总体方案决策和最终收口，只负责返回对主代理有用的结果。
 
-## Subagent Output Limits
+## 成本控制原则
 
-- Ask subagents to return concise, decision-useful summaries rather than long transcripts.
-- Default to returning:
-  1. a short conclusion,
-  2. up to 5 findings,
-  3. file paths and line numbers for each finding,
-  4. a brief recommendation for each actionable issue.
-- Do not return full files, large code blocks, or full logs unless explicitly requested.
-- Quote only the minimum snippet needed to support a finding.
-- If no actionable issue is found, say so clearly and stop.
+- 避免无边界探索；在目标、范围和验收条件不清楚前，不进行大范围扫描或长链路分析。
+- 避免重复读取和重复分析；同一问题应尽量复用已有结论，减少主代理与子代理对同一材料的重复处理。
+- 避免低价值派单；如果任务边界不清、收益不明显，或主代理可直接完成，不应为了派单而派单。
+- 避免过量返回；子代理输出应以结论和关键发现为主，不返回整文件、大段日志、长篇推理或无关背景。
+- 避免低收益并发；只有在明显改善质量与成本平衡时，才并发使用多个 OSS 子代理。
+- 避免不必要的全量验证；优先做与当前问题直接相关的最小验证，再决定是否扩大范围。
+
+## 子代理使用原则
+
+- 禁止使用 GPT 子代理；需要派单时，只使用 OSS 子代理。
+- `oss_flash` 和 `oss_glm` 视为文本模型，`oss_mimo` 和 `oss_kimi` 视为多模态模型。
+- 纯文本任务默认优先考虑文本模型；涉及截图、图片、界面或其他视觉材料时，再优先考虑多模态模型。
+- 子代理任务应尽量保持封闭、明确、可验收，避免无边界探索。

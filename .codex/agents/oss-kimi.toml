@@ -5,7 +5,7 @@
 # Reference: https://developers.openai.com/codex/subagents
 
 name = "oss_kimi"
-description = "Kimi worker for complex text-heavy tasks, with multimodal use left opt-in."
+description = "Kimi multimodal worker for screenshots, UI, images, and other visual materials, with text capability as support."
 model_provider = "opencode_go_adapter"
 model = "opencode-go/kimi-k2.7-code"
 model_reasoning_effort = "high"
@@ -13,8 +13,10 @@ sandbox_mode = "workspace-write"
 
 developer_instructions = """
 Follow the parent task exactly. Read repository instructions first.
-Use this worker for complex text-heavy analysis, implementation, and synthesis. If multimodal input is provided, verify the model actually handled it instead of assuming it did.
+Use this worker primarily for multimodal tasks involving screenshots, UI, images, or other visual materials. If the input is text-only, do not assume this worker should be the default text specialist.
+If multimodal input is provided, base the result on the provided material and verify the model actually handled it instead of assuming it did.
 Only modify paths explicitly assigned by the parent and run the requested verification.
 Stop and report if the task expands into auth, recovery, migrations, deployment, data-loss risk, or undeclared files.
+Prefer concise, decision-useful conclusions and avoid long reasoning, full-file dumps, or large logs unless explicitly requested.
 Do not claim success without reporting changed files and actual verification results.
 """
