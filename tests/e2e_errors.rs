@@ -7,11 +7,11 @@ use serde_json::{json, Value};
 #[tokio::test]
 async fn test_e2e_upstream_http_error() {
     let (upstream_addr, _mock, _received) = start_mock_upstream_error().await;
-    let adapter_addr = start_adapter(upstream_addr, None).await;
-    let client = reqwest::Client::new();
+    let adapter = start_adapter(upstream_addr, None).await;
 
-    let resp = client
-        .post(adapter_url(adapter_addr, "/v1/responses"))
+    let resp = adapter
+        .client
+        .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
             "model": "opencode-go/deepseek-v4-flash",
             "input": "Hello",
@@ -44,11 +44,11 @@ async fn test_e2e_upstream_http_error() {
 #[tokio::test]
 async fn test_e2e_upstream_stream_error() {
     let (upstream_addr, _mock, _received) = start_mock_upstream_stream_error().await;
-    let adapter_addr = start_adapter(upstream_addr, None).await;
-    let client = reqwest::Client::new();
+    let adapter = start_adapter(upstream_addr, None).await;
 
-    let resp = client
-        .post(adapter_url(adapter_addr, "/v1/responses"))
+    let resp = adapter
+        .client
+        .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
             "model": "opencode-go/deepseek-v4-flash",
             "input": "Hello",

@@ -4,7 +4,7 @@ use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::{Json, Router};
 use codex_opencode_adapter::config::Config;
-use codex_opencode_adapter::server::{self, AppState};
+use codex_opencode_adapter::server::{self, AppState, ProjectRuntime};
 use codex_opencode_adapter::state::StateStore;
 use codex_opencode_adapter::upstream::OpenCodeGoClient;
 use serde_json::{json, Value};
@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Semaphore};
+use uuid::Uuid;
 
 #[derive(Clone)]
 struct MockState {
@@ -21,10 +22,9 @@ struct MockState {
 #[tokio::test]
 async fn nonstream_upstream_http_error_returns_responses_failed_body() {
     let (upstream_addr, _mock, received) = start_error_upstream().await;
-    let adapter_addr = start_adapter(upstream_addr).await;
-    let client = reqwest::Client::new();
+    let (adapter_addr, _token, adapter_client) = start_adapter(upstream_addr).await;
 
-    let resp = client
+    let resp = adapter_client
         .post(format!("http://{adapter_addr}/v1/responses"))
         .json(&json!({
             "model": "opencode-go/deepseek-v4-flash",
@@ -92,43 +92,67 @@ async fn mock_chat_error(
     )
 }
 
-async fn start_adapter(upstream_addr: SocketAddr) -> SocketAddr {
+async fn start_adapter(upstream_addr: SocketAddr) -> (SocketAddr, String, reqwest::Client) {
     let db_path = std::env::temp_dir().join(format!(
         "nonstream_upstream_error_{}.sqlite",
-        uuid::Uuid::new_v4()
+        Uuid::new_v4()
     ));
+    let project_id = "test-nons".to_string();
+    let raw_token = format!("codex-nons-raw-{}", Uuid::new_v4().simple());
+    let signed_token = codex_opencode_adapter::project::sign_local_token(&project_id, &raw_token);
     let config = Config {
         host: "127.0.0.1".to_string(),
         port: 0,
         upstream_base: format!("http://{upstream_addr}"),
         upstream_key: "test-api-key".to_string(),
-        local_token: None,
+        local_token: Some(raw_token),
         state_db: db_path.to_string_lossy().to_string(),
         state_ttl_seconds: 21_600,
         timeout_seconds: 30,
         max_request_bytes: 8 * 1024 * 1024,
         max_concurrency: 10,
     };
-    let client = OpenCodeGoClient::new(
+    let inner_client = OpenCodeGoClient::new(
         &config.upstream_base,
         &config.upstream_key,
         config.timeout_seconds,
     )
     .unwrap();
     let state = StateStore::new(&config.state_db, config.state_ttl_seconds).unwrap();
+    let mut projects = std::collections::HashMap::new();
+    projects.insert(
+        project_id,
+        ProjectRuntime {
+            config,
+            client: inner_client,
+            state,
+        },
+    );
     let app_state = AppState {
-        config,
-        client,
-        state,
+        projects,
         capacity: Arc::new(Semaphore::new(10)),
     };
     let app = server::router(app_state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+
+    let client = reqwest::Client::builder()
+        .default_headers({
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                reqwest::header::HeaderValue::from_str(&format!("Bearer {}", signed_token))
+                    .unwrap(),
+            );
+            headers
+        })
+        .build()
+        .unwrap();
+
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    addr
+    (addr, signed_token, client)
 }

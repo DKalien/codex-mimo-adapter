@@ -17,6 +17,7 @@ fn init_writes_project_files_and_auth_prints_local_token() {
     let env_text =
         fs::read_to_string(sandbox.project().join(".codex-opencode-adapter.env")).unwrap();
     assert!(env_text.contains("OPENCODE_GO_API_KEY=test-api-key"));
+    assert!(env_text.contains("CODEX_OPENCODE_PROJECT_ID=opencode_adapter_"));
     assert!(env_text.contains("CODEX_OPENCODE_STATE_DB=.codex-opencode/state.sqlite"));
 
     let token = env_text
@@ -50,48 +51,32 @@ fn init_writes_project_files_and_auth_prints_local_token() {
 
     let auth_output = sandbox.run(["auth", "print-local-token"]);
     assert_success(&auth_output);
-    assert_eq!(stdout(&auth_output).trim(), token);
+    let signed_token = stdout(&auth_output).trim().to_string();
+    assert!(
+        signed_token.starts_with("codex-opencode-"),
+        "token must be signed: {signed_token}"
+    );
+    assert_ne!(
+        signed_token, token,
+        "signed token must differ from raw token"
+    );
 
     let nested_dir = sandbox.project().join("src").join("nested");
     fs::create_dir_all(&nested_dir).unwrap();
     let nested_auth_output = sandbox.run_in(&nested_dir, ["auth", "print-local-token"]);
     assert_success(&nested_auth_output);
-    assert_eq!(stdout(&nested_auth_output).trim(), token);
+    assert_eq!(stdout(&nested_auth_output).trim(), signed_token);
 
+    // Provider auth may run outside the project; active project fallback keeps it working.
     let external_dir = sandbox.root().join("external");
     fs::create_dir_all(&external_dir).unwrap();
-    sandbox.write_process_manager(&token, "thread-from-process-manager");
-    let external_auth_output = sandbox.run_in_with_env(
-        &external_dir,
-        ["auth", "print-local-token"],
-        [("CODEX_THREAD_ID", "thread-from-process-manager")],
-    );
+    let external_auth_output = sandbox.run_in(&external_dir, ["auth", "print-local-token"]);
     assert_success(&external_auth_output);
-    assert_eq!(stdout(&external_auth_output).trim(), token);
-
-    let ambient_process_auth_output =
-        sandbox.run_in(&external_dir, ["auth", "print-local-token"]);
-    assert_success(&ambient_process_auth_output);
-    assert_eq!(stdout(&ambient_process_auth_output).trim(), token);
-
-    fs::remove_file(sandbox.process_manager_path()).unwrap();
-    sandbox.write_session_meta("thread-from-session-meta");
-    let session_auth_output = sandbox.run_in_with_env(
-        &external_dir,
-        ["auth", "print-local-token"],
-        [("CODEX_THREAD_ID", "thread-from-session-meta")],
-    );
-    assert_success(&session_auth_output);
-    assert_eq!(stdout(&session_auth_output).trim(), token);
-
-    let ambient_session_auth_output =
-        sandbox.run_in(&external_dir, ["auth", "print-local-token"]);
-    assert_success(&ambient_session_auth_output);
-    assert_eq!(stdout(&ambient_session_auth_output).trim(), token);
+    assert_eq!(stdout(&external_auth_output).trim(), signed_token);
 }
 
 #[test]
-fn init_updates_existing_provider_preserves_other_config_and_creates_backup() {
+fn init_updates_existing_provider_and_creates_backup() {
     let sandbox = TestSandbox::new("init-update");
     let config_dir = sandbox.home().join(".codex");
     fs::create_dir_all(&config_dir).unwrap();
@@ -136,6 +121,26 @@ timeout_ms = 1000
 }
 
 #[test]
+fn init_from_subdirectory_writes_only_current_dir() {
+    let sandbox = TestSandbox::new("init-subdir");
+    let parent = sandbox.project();
+    let child = parent.join("child");
+    fs::create_dir_all(&child).unwrap();
+
+    let output = sandbox.run_in(&child, ["init", "--api-key", "child-key"]);
+    assert_success(&output);
+
+    assert!(
+        !parent.join(".codex-opencode-adapter.env").exists(),
+        "init from child must not write parent project env"
+    );
+    assert!(
+        child.join(".codex-opencode-adapter.env").exists(),
+        "init from child must write child project env"
+    );
+}
+
+#[test]
 fn init_rolls_back_when_agent_write_fails() {
     let sandbox = TestSandbox::new("init-rollback");
     let config_dir = sandbox.home().join(".codex");
@@ -167,21 +172,83 @@ fn init_rolls_back_when_agent_write_fails() {
 fn auth_run_and_start_require_init() {
     let sandbox = TestSandbox::new("not-initialized");
 
-    for args in [
-        vec!["auth", "print-local-token"],
-        vec!["run"],
-        vec!["start"],
-    ] {
+    // auth discovers project from CWD; run/start use registry
+    let output = sandbox.run(vec!["auth", "print-local-token"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("unable to locate initialized project"),
+        "auth stderr was: {}",
+        stderr(&output)
+    );
+
+    for args in [vec!["run"], vec!["start"]] {
         let output = sandbox.run(args);
         assert!(!output.status.success());
         assert!(
-            stderr(&output).contains(
-                "project is not initialized; run codex-opencode-adapter init from the project root first"
-            ),
-            "stderr was: {}",
+            stderr(&output).contains("no projects found in registry; run init first"),
+            "run/start stderr was: {}",
             stderr(&output)
         );
     }
+}
+
+#[test]
+fn auth_recovers_project_from_codex_thread_session() {
+    let sandbox = TestSandbox::new("auth-thread-recovery");
+    let init_output = sandbox.run(["init", "--api-key", "test-api-key"]);
+    assert_success(&init_output);
+    let direct = sandbox.run(["auth", "print-local-token"]);
+    assert_success(&direct);
+
+    let external_dir = sandbox.root().join("external");
+    fs::create_dir_all(&external_dir).unwrap();
+    let thread_id = "019f-test-thread-recovery";
+    sandbox.write_session_meta(thread_id, sandbox.project());
+
+    let recovered = sandbox.run_in_with_env(
+        &external_dir,
+        ["auth", "print-local-token"],
+        [("CODEX_THREAD_ID", thread_id)],
+    );
+    assert_success(&recovered);
+    assert_eq!(stdout(&recovered).trim(), stdout(&direct).trim());
+}
+
+#[test]
+fn auth_rejects_recovered_project_when_registry_mismatches_env() {
+    let sandbox = TestSandbox::new("auth-thread-mismatch");
+    let init_output = sandbox.run(["init", "--api-key", "test-api-key"]);
+    assert_success(&init_output);
+
+    let env_path = sandbox.project().join(".codex-opencode-adapter.env");
+    let mut env_text = fs::read_to_string(&env_path).unwrap();
+    let original_project_id = env_text
+        .lines()
+        .find_map(|line| line.strip_prefix("CODEX_OPENCODE_PROJECT_ID="))
+        .unwrap()
+        .to_string();
+    env_text = env_text.replace(
+        &format!("CODEX_OPENCODE_PROJECT_ID={original_project_id}"),
+        "CODEX_OPENCODE_PROJECT_ID=opencode_adapter_wrongid",
+    );
+    fs::write(&env_path, env_text).unwrap();
+
+    let external_dir = sandbox.root().join("external");
+    fs::create_dir_all(&external_dir).unwrap();
+    let thread_id = "019f-test-thread-mismatch";
+    sandbox.write_session_meta(thread_id, sandbox.project());
+
+    let output = sandbox.run_in_with_env(
+        &external_dir,
+        ["auth", "print-local-token"],
+        [("CODEX_THREAD_ID", thread_id)],
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("unable to locate initialized project"),
+        "auth stderr was: {}",
+        stderr(&output)
+    );
 }
 
 #[test]
@@ -212,7 +279,7 @@ fn check_uses_project_env_and_succeeds() {
     fs::write(
         sandbox.project().join(".codex-opencode-adapter.env"),
         format!(
-            "OPENCODE_GO_API_KEY=test-api-key\nCODEX_OPENCODE_LOCAL_TOKEN={token}\nCODEX_OPENCODE_HOST=127.0.0.1\nCODEX_OPENCODE_PORT={port}\n",
+            "OPENCODE_GO_API_KEY=test-api-key\nCODEX_OPENCODE_LOCAL_TOKEN={token}\nCODEX_OPENCODE_PROJECT_ID=test-check-project\nCODEX_OPENCODE_HOST=127.0.0.1\nCODEX_OPENCODE_PORT={port}\n",
             token = local_token.as_str(),
             port = addr.port()
         ),
@@ -224,6 +291,90 @@ fn check_uses_project_env_and_succeeds() {
     assert!(stdout(&output).contains("Adapter check passed."));
 }
 
+// ---------------------------------------------------------------------------
+// Test: dual-project isolation
+#[test]
+fn dual_project_isolation() {
+    let sandbox = TestSandbox::new("dual-project");
+
+    // Project A
+    let proj_a = sandbox.root().join("proj_a");
+    fs::create_dir_all(&proj_a).unwrap();
+    let out_a = sandbox.run_in(&proj_a, ["init", "--api-key", "key-a"]);
+    assert_success(&out_a);
+    let env_a = fs::read_to_string(proj_a.join(".codex-opencode-adapter.env")).unwrap();
+    let pid_a = env_a
+        .lines()
+        .find_map(|l| l.strip_prefix("CODEX_OPENCODE_PROJECT_ID="))
+        .unwrap()
+        .to_string();
+    let token_a = env_a
+        .lines()
+        .find_map(|l| l.strip_prefix("CODEX_OPENCODE_LOCAL_TOKEN="))
+        .unwrap()
+        .to_string();
+    assert!(pid_a.starts_with("opencode_adapter_"));
+
+    // Project B
+    let proj_b = sandbox.root().join("proj_b");
+    fs::create_dir_all(&proj_b).unwrap();
+    let out_b = sandbox.run_in(&proj_b, ["init", "--api-key", "key-b"]);
+    assert_success(&out_b);
+    let env_b = fs::read_to_string(proj_b.join(".codex-opencode-adapter.env")).unwrap();
+    let pid_b = env_b
+        .lines()
+        .find_map(|l| l.strip_prefix("CODEX_OPENCODE_PROJECT_ID="))
+        .unwrap()
+        .to_string();
+    let token_b = env_b
+        .lines()
+        .find_map(|l| l.strip_prefix("CODEX_OPENCODE_LOCAL_TOKEN="))
+        .unwrap()
+        .to_string();
+
+    assert_ne!(pid_a, pid_b, "each project must get unique project_id");
+    assert_ne!(token_a, token_b, "each project must get unique local_token");
+
+    // Agent templates reference opencode_go_adapter (not project-specific)
+    for proj in [&proj_a, &proj_b] {
+        for name in ["oss-flash.toml", "oss-pro.toml"] {
+            let text = fs::read_to_string(proj.join(".codex").join("agents").join(name)).unwrap();
+            assert!(
+                text.contains("model_provider = \"opencode_go_adapter\""),
+                "{}/agents/{name} must use fixed provider",
+                proj.display()
+            );
+        }
+    }
+
+    // Global config has single opencode_go_adapter (not project-specific)
+    let config = fs::read_to_string(sandbox.home().join(".codex").join("config.toml")).unwrap();
+    assert!(
+        config.contains("[model_providers.opencode_go_adapter]"),
+        "config must contain opencode_go_adapter"
+    );
+    assert!(
+        !config.contains("opencode_adapter_"),
+        "config should not contain project-specific provider names"
+    );
+
+    // Auth returns different signed tokens
+    let auth_a = sandbox.run_in(&proj_a, ["auth", "print-local-token"]);
+    assert_success(&auth_a);
+    let signed_a = stdout(&auth_a).trim().to_string();
+    assert!(signed_a.starts_with("codex-opencode-"));
+
+    let auth_b = sandbox.run_in(&proj_b, ["auth", "print-local-token"]);
+    assert_success(&auth_b);
+    let signed_b = stdout(&auth_b).trim().to_string();
+    assert!(signed_b.starts_with("codex-opencode-"));
+
+    assert_ne!(
+        signed_a, signed_b,
+        "signed tokens must differ between projects"
+    );
+}
+
 async fn models_handler(
     headers: HeaderMap,
     expected_token: Arc<String>,
@@ -232,7 +383,9 @@ async fn models_handler(
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
-    if auth != format!("Bearer {}", expected_token.as_str()) {
+    let raw_expected = format!("Bearer {}", expected_token.as_str());
+    let accept = auth == raw_expected || auth.starts_with("Bearer codex-opencode-");
+    if !accept {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "unauthorized" })),
@@ -308,44 +461,6 @@ impl TestSandbox {
             .unwrap()
     }
 
-    fn write_process_manager(&self, token: &str, thread_id: &str) {
-        let content = format!(
-            "[{{\"conversationId\":\"{thread_id}\",\"cwd\":\"{}\",\"command\":\"auth\",\"itemId\":\"call_1\",\"updatedAtMs\":1}}]",
-            escape_json_path(self.project())
-        );
-        let path = self.process_manager_path();
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, content).unwrap();
-
-        let env_path = self.project().join(".codex-opencode-adapter.env");
-        let env_text = fs::read_to_string(&env_path).unwrap();
-        assert!(env_text.contains(token));
-    }
-
-    fn write_session_meta(&self, thread_id: &str) {
-        let session_path = self
-            .home()
-            .join(".codex")
-            .join("sessions")
-            .join("2026")
-            .join("06")
-            .join("26")
-            .join(format!("rollout-{thread_id}.jsonl"));
-        fs::create_dir_all(session_path.parent().unwrap()).unwrap();
-        let content = format!(
-            "{{\"timestamp\":\"2026-06-26T09:09:30.375Z\",\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{thread_id}\",\"id\":\"child-thread\",\"cwd\":\"{}\"}}}}\n",
-            escape_json_path(self.project())
-        );
-        fs::write(session_path, content).unwrap();
-    }
-
-    fn process_manager_path(&self) -> PathBuf {
-        self.home()
-            .join(".codex")
-            .join("process_manager")
-            .join("chat_processes.json")
-    }
-
     fn project(&self) -> &Path {
         &self.project
     }
@@ -356,6 +471,27 @@ impl TestSandbox {
 
     fn home(&self) -> &Path {
         &self.home
+    }
+
+    fn write_session_meta(&self, thread_id: &str, cwd: &Path) {
+        let session_dir = self
+            .home
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("06")
+            .join("27");
+        fs::create_dir_all(&session_dir).unwrap();
+        let session_path =
+            session_dir.join(format!("rollout-2026-06-27T00-00-00-{thread_id}.jsonl"));
+        let cwd = cwd.to_string_lossy().replace('\\', "\\\\");
+        fs::write(
+            session_path,
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{thread_id}\",\"cwd\":\"{cwd}\"}}}}\n"
+            ),
+        )
+        .unwrap();
     }
 }
 
@@ -384,8 +520,4 @@ fn stdout(output: &Output) -> String {
 
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn escape_json_path(path: &Path) -> String {
-    path.display().to_string().replace('\\', "\\\\")
 }

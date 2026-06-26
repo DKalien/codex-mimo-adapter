@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "codex-opencode-adapter"
 version = "0.2.0"
 edition = "2021"
@@ -18,10 +18,11 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+hmac = "0.12"
 thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-toml_edit = "0.22"
+toml_edit = { version = "0.22", features = ["serde"] }
 tower-http = { version = "0.5", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

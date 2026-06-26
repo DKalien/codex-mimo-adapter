@@ -3,8 +3,9 @@ use crate::config::{
     DEFAULT_HOST, DEFAULT_MAX_CONCURRENCY, DEFAULT_MAX_REQUEST_BYTES, DEFAULT_STATE_DB,
     DEFAULT_STATE_TTL_SECONDS, DEFAULT_TIMEOUT_SECONDS,
 };
-use crate::project::ProjectPaths;
+use crate::project::{generate_project_id, remember_active_project, ProjectPaths, ProjectRegistry};
 use anyhow::{anyhow, Context};
+
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -21,7 +22,8 @@ const OSS_MINIMAX_TEMPLATE: &str = include_str!("../resources/templates/oss-mini
 const OSS_PRO_TEMPLATE: &str = include_str!("../resources/templates/oss-pro.toml");
 
 pub fn run_init(args: InitArgs) -> anyhow::Result<()> {
-    let project = ProjectPaths::from_current_dir()?;
+    let project = ProjectPaths::from_init_dir()?;
+    let project_id = generate_project_id(&project.root);
     let logger = InitLogger::new()?;
     logger.log("init started")?;
 
@@ -32,7 +34,17 @@ pub fn run_init(args: InitArgs) -> anyhow::Result<()> {
     let local_token = format!("codex-opencode-{}", Uuid::new_v4().simple());
 
     let env_contents = format!(
-        "OPENCODE_GO_API_KEY={api_key}\nCODEX_OPENCODE_LOCAL_TOKEN={local_token}\nCODEX_OPENCODE_HOST={host}\nCODEX_OPENCODE_PORT={port}\nOPENCODE_GO_BASE_URL={upstream_base}\nCODEX_OPENCODE_STATE_DB={state_db}\nCODEX_OPENCODE_STATE_TTL_SECONDS={ttl}\nCODEX_OPENCODE_TIMEOUT_SECONDS={timeout}\nCODEX_OPENCODE_MAX_REQUEST_BYTES={max_request_bytes}\nCODEX_OPENCODE_MAX_CONCURRENCY={max_concurrency}\n",
+        "OPENCODE_GO_API_KEY={api_key}\n\
+         CODEX_OPENCODE_LOCAL_TOKEN={local_token}\n\
+         CODEX_OPENCODE_PROJECT_ID={project_id}\n\
+         CODEX_OPENCODE_HOST={host}\n\
+         CODEX_OPENCODE_PORT={port}\n\
+         OPENCODE_GO_BASE_URL={upstream_base}\n\
+         CODEX_OPENCODE_STATE_DB={state_db}\n\
+         CODEX_OPENCODE_STATE_TTL_SECONDS={ttl}\n\
+         CODEX_OPENCODE_TIMEOUT_SECONDS={timeout}\n\
+         CODEX_OPENCODE_MAX_REQUEST_BYTES={max_request_bytes}\n\
+         CODEX_OPENCODE_MAX_CONCURRENCY={max_concurrency}\n",
         host = args.host,
         port = args.port,
         upstream_base = args.upstream_base,
@@ -50,6 +62,12 @@ pub fn run_init(args: InitArgs) -> anyhow::Result<()> {
         logger.log(&format!("created global config backup: {}", path.display()))?;
     }
 
+    let mut registry = ProjectRegistry::load(&user_dir()?);
+    registry.upsert_project(&project_id, &project.root);
+    registry.save(&user_dir()?)?;
+    logger.log(&format!("registered project {project_id}"))?;
+
+    // Agent templates always use the fixed opencode_go_adapter provider name.
     let writes = vec![
         PendingWrite::new(global_config_path, global_config_contents.into_bytes()),
         PendingWrite::new(project.env_file.clone(), env_contents.into_bytes()),
@@ -78,6 +96,7 @@ pub fn run_init(args: InitArgs) -> anyhow::Result<()> {
 
     fs::create_dir_all(&project.state_dir)
         .with_context(|| format!("failed to create {}", project.state_dir.display()))?;
+    remember_active_project(&project.root)?;
     logger.log("init completed successfully")?;
     println!("Initialization complete. Next: codex-opencode-adapter run");
     Ok(())
@@ -102,11 +121,15 @@ fn global_codex_config_path() -> anyhow::Result<PathBuf> {
     Ok(PathBuf::from(home).join(".codex").join("config.toml"))
 }
 
-fn user_log_path() -> anyhow::Result<PathBuf> {
+fn user_dir() -> anyhow::Result<PathBuf> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .context("failed to resolve user home directory")?;
-    Ok(PathBuf::from(home).join(USER_DIR_NAME).join(INIT_LOG_FILE))
+    Ok(PathBuf::from(home).join(USER_DIR_NAME))
+}
+
+fn user_log_path() -> anyhow::Result<PathBuf> {
+    Ok(user_dir()?.join(INIT_LOG_FILE))
 }
 
 fn build_global_codex_config(path: &Path, port: u16) -> anyhow::Result<String> {
@@ -165,17 +188,23 @@ fn create_backup_if_exists(path: &Path) -> anyhow::Result<Option<PathBuf>> {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let backup_path = path.with_extension(format!("toml.bak.{timestamp}"));
-    fs::copy(path, &backup_path).with_context(|| format!("failed to backup {}", path.display()))?;
-    Ok(Some(backup_path))
+    let backup = path.with_extension(format!("toml.bak.{timestamp}"));
+    fs::copy(path, &backup).with_context(|| {
+        format!(
+            "failed to create backup of {} at {}",
+            path.display(),
+            backup.display()
+        )
+    })?;
+    Ok(Some(backup))
 }
 
 fn apply_writes_with_rollback(
     writes: Vec<PendingWrite>,
     logger: &InitLogger,
 ) -> anyhow::Result<()> {
-    let mut applied = Vec::new();
-    for write in writes {
+    let mut applied: Vec<WrittenFile> = Vec::new();
+    for write in &writes {
         logger.log(&format!("writing {}", write.path.display()))?;
         match write.apply() {
             Ok(snapshot) => applied.push(snapshot),

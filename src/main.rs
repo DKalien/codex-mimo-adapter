@@ -1,9 +1,14 @@
 use clap::Parser;
 use codex_opencode_adapter::cli::{AuthCommands, Cli, Commands, RunArgs};
-use codex_opencode_adapter::config::{Config, ConfigOverrides};
+use codex_opencode_adapter::config::{
+    Config, ConfigOverrides, DEFAULT_HOST, DEFAULT_MAX_CONCURRENCY, DEFAULT_PORT,
+};
 use codex_opencode_adapter::init::run_init;
-use codex_opencode_adapter::project::{current_environment, read_project_env, ProjectPaths};
-use codex_opencode_adapter::server::{router, AppState};
+use codex_opencode_adapter::project::{
+    current_environment, read_project_env, registry_dir_path, remember_active_project,
+    sign_local_token, ProjectPaths, ProjectRegistry, PROJECT_ENV_FILENAME,
+};
+use codex_opencode_adapter::server::{router, AppState, ProjectRuntime};
 use codex_opencode_adapter::state::StateStore;
 use codex_opencode_adapter::upstream::OpenCodeGoClient;
 use std::sync::Arc;
@@ -28,7 +33,15 @@ async fn main() -> anyhow::Result<()> {
                     .local_token
                     .filter(|value| !value.is_empty())
                     .ok_or_else(|| anyhow::anyhow!("CODEX_OPENCODE_LOCAL_TOKEN is missing"))?;
-                println!("{token}");
+                let project = ProjectPaths::from_current_dir()
+                    .map_err(|_| anyhow::anyhow!("project env not found"))?;
+                let _ = remember_active_project(&project.root);
+                let project_env = read_project_env(&project.env_file)?;
+                let project_id = project_env
+                    .get("CODEX_OPENCODE_PROJECT_ID")
+                    .ok_or_else(|| anyhow::anyhow!("CODEX_OPENCODE_PROJECT_ID is missing"))?;
+                let signed = codex_opencode_adapter::project::sign_local_token(project_id, &token);
+                println!("{signed}");
                 Ok(())
             }
         },
@@ -36,20 +49,74 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_server(args: RunArgs) -> anyhow::Result<()> {
-    let config = load_project_config(args)?;
-    let addr = config.addr()?;
-    let client = OpenCodeGoClient::new(
-        &config.upstream_base,
-        &config.upstream_key,
-        config.timeout_seconds,
-    )?;
-    let state = StateStore::new(&config.state_db, config.state_ttl_seconds)?;
-    let max_concurrency = config.max_concurrency;
+    if let Ok(cwd) = std::env::current_dir() {
+        let _ = remember_active_project(&cwd);
+    }
+    let reg_dir = registry_dir_path()?;
+    let registry = ProjectRegistry::load(&reg_dir);
+    if registry.projects.is_empty() {
+        return Err(anyhow::anyhow!(
+            "no projects found in registry; run init first"
+        ));
+    }
+    let mut projects = std::collections::HashMap::new();
+    for (project_id, entry) in &registry.projects {
+        let root = std::path::PathBuf::from(&entry.root);
+        let env_path = root.join(PROJECT_ENV_FILENAME);
+        if !env_path.exists() {
+            tracing::warn!(
+                "project {project_id} missing env file at {}, skipping",
+                env_path.display()
+            );
+            continue;
+        }
+        let project_env = read_project_env(&env_path)?;
+        let env = current_environment();
+        let overrides = ConfigOverrides {
+            host: args.host.clone(),
+            port: args.port,
+            upstream_base: None,
+            upstream_key: None,
+            local_token: None,
+            state_db: None,
+            state_ttl_seconds: None,
+            timeout_seconds: None,
+            max_request_bytes: None,
+            max_concurrency: args.max_concurrency,
+        };
+        let config = Config::from_sources(&project_env, &env, overrides)?;
+        let state_db_path = root.join(&config.state_db);
+        let state = StateStore::new(
+            state_db_path.display().to_string(),
+            config.state_ttl_seconds,
+        )?;
+        let client = OpenCodeGoClient::new(
+            &config.upstream_base,
+            &config.upstream_key,
+            config.timeout_seconds,
+        )?;
+        projects.insert(
+            project_id.clone(),
+            ProjectRuntime {
+                config,
+                client,
+                state,
+            },
+        );
+    }
+    if projects.is_empty() {
+        return Err(anyhow::anyhow!("no valid projects found in registry"));
+    }
+    let host = args
+        .host
+        .clone()
+        .unwrap_or_else(|| DEFAULT_HOST.to_string());
+    let port = args.port.unwrap_or(DEFAULT_PORT);
+    let max_concurrency = args.max_concurrency.unwrap_or(DEFAULT_MAX_CONCURRENCY);
+    let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;
     tracing::info!(max_concurrency, "adapter concurrency limit configured");
     let app_state = AppState {
-        config,
-        client,
-        state,
+        projects,
         capacity: Arc::new(Semaphore::new(max_concurrency)),
     };
     let app = router(app_state);
@@ -65,6 +132,21 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
 
 async fn run_check() -> anyhow::Result<()> {
     let config = load_project_config(RunArgs::default())?;
+    // Sign the local token with project_id for HMAC validation
+    let project =
+        ProjectPaths::from_current_dir().map_err(|_| anyhow::anyhow!("project env not found"))?;
+    let _ = remember_active_project(&project.root);
+    let project_env = read_project_env(&project.env_file)?;
+    let project_id = project_env
+        .get("CODEX_OPENCODE_PROJECT_ID")
+        .ok_or_else(|| anyhow::anyhow!("CODEX_OPENCODE_PROJECT_ID is missing in project env"))?;
+    let raw_token = config
+        .local_token
+        .as_deref()
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("CODEX_OPENCODE_LOCAL_TOKEN is missing"))?;
+    let signed_token = sign_local_token(project_id, raw_token);
+
     let base = format!("http://{}:{}", config.host, config.port);
     let client = reqwest::Client::new();
     let health = client
@@ -76,11 +158,11 @@ async fn run_check() -> anyhow::Result<()> {
         })?;
     anyhow::ensure!(health.status().is_success(), "health check failed");
 
-    let mut request = client.get(format!("{base}/v1/models"));
-    if let Some(token) = config.local_token.filter(|value| !value.is_empty()) {
-        request = request.bearer_auth(token);
-    }
-    let models = request.send().await?;
+    let models = client
+        .get(format!("{base}/v1/models"))
+        .bearer_auth(&signed_token)
+        .send()
+        .await?;
     anyhow::ensure!(models.status().is_success(), "/v1/models check failed");
     println!("Adapter check passed.");
     Ok(())

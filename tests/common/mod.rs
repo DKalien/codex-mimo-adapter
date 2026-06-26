@@ -3,19 +3,33 @@
 pub mod mock_upstream;
 
 use codex_opencode_adapter::config::Config;
-use codex_opencode_adapter::server::{self, AppState};
+use codex_opencode_adapter::project::sign_local_token;
+use codex_opencode_adapter::server::{self, AppState, ProjectRuntime};
 use codex_opencode_adapter::state::StateStore;
 use codex_opencode_adapter::upstream::OpenCodeGoClient;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
+use uuid::Uuid;
 
-pub async fn start_adapter(upstream_addr: SocketAddr, local_token: Option<String>) -> SocketAddr {
+pub struct TestAdapter {
+    pub addr: SocketAddr,
+    pub token: String,
+    pub client: reqwest::Client,
+}
+
+pub async fn start_adapter(upstream_addr: SocketAddr, local_token: Option<String>) -> TestAdapter {
     let temp_dir = std::env::temp_dir();
-    let db_name = format!("test_e2e_{}.sqlite", uuid::Uuid::new_v4());
+    let db_name = format!("test_e2e_{}.sqlite", Uuid::new_v4());
     let db_path = temp_dir.join(db_name);
+
+    let project_id = "test-project".to_string();
+    let raw_token =
+        local_token.unwrap_or_else(|| format!("codex-test-raw-{}", Uuid::new_v4().simple()));
+    let signed_token = sign_local_token(&project_id, &raw_token);
 
     let upstream_base = format!("http://{}", upstream_addr);
     let config = Config {
@@ -23,7 +37,7 @@ pub async fn start_adapter(upstream_addr: SocketAddr, local_token: Option<String
         port: 0,
         upstream_base,
         upstream_key: "test-api-key".to_string(),
-        local_token,
+        local_token: Some(raw_token),
         state_db: db_path.to_string_lossy().to_string(),
         state_ttl_seconds: 21_600,
         timeout_seconds: 30,
@@ -31,7 +45,7 @@ pub async fn start_adapter(upstream_addr: SocketAddr, local_token: Option<String
         max_concurrency: 10,
     };
 
-    let client = OpenCodeGoClient::new(
+    let inner_client = OpenCodeGoClient::new(
         &config.upstream_base,
         &config.upstream_key,
         config.timeout_seconds,
@@ -40,21 +54,43 @@ pub async fn start_adapter(upstream_addr: SocketAddr, local_token: Option<String
     let state = StateStore::new(&config.state_db, config.state_ttl_seconds).unwrap();
     let capacity = Arc::new(Semaphore::new(10));
 
-    let app_state = AppState {
-        config,
-        client,
-        state,
-        capacity,
-    };
+    let mut projects = HashMap::new();
+    projects.insert(
+        project_id,
+        ProjectRuntime {
+            config,
+            client: inner_client,
+            state,
+        },
+    );
+    let app_state = AppState { projects, capacity };
     let app = server::router(app_state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+
+    let auth_value = format!("Bearer {}", signed_token);
+    let client = reqwest::Client::builder()
+        .default_headers({
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                reqwest::header::HeaderValue::from_str(&auth_value).unwrap(),
+            );
+            headers
+        })
+        .build()
+        .unwrap();
+
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    addr
+    TestAdapter {
+        addr,
+        token: signed_token,
+        client,
+    }
 }
 
 pub fn adapter_url(addr: SocketAddr, path: &str) -> String {
@@ -118,12 +154,17 @@ pub async fn start_real_adapter(config: &RealSmokeConfig) -> SocketAddr {
         StateStore::new(&adapter_config.state_db, adapter_config.state_ttl_seconds).unwrap();
     let capacity = Arc::new(Semaphore::new(4));
 
-    let app_state = AppState {
-        config: adapter_config,
-        client,
-        state,
-        capacity,
-    };
+    let project_id = "test".to_string();
+    let mut projects = std::collections::HashMap::new();
+    projects.insert(
+        project_id,
+        ProjectRuntime {
+            config: adapter_config,
+            client,
+            state,
+        },
+    );
+    let app_state = AppState { projects, capacity };
     let app = server::router(app_state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -5,6 +5,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::StreamExt;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -19,6 +20,7 @@ use crate::media_guard::{
     find_unsupported_multimodal_input, is_multimodal_unsupported_error,
     unsupported_multimodal_error_message,
 };
+use crate::project::{parse_project_id_from_token, validate_signed_token};
 use crate::state::{now_ts, StateStore};
 use crate::upstream::{
     extract_error_message, parse_chat_sse_bytes, sse_data_from_block, sse_event_from_block,
@@ -26,10 +28,15 @@ use crate::upstream::{
 };
 
 #[derive(Clone)]
-pub struct AppState {
+pub struct ProjectRuntime {
     pub config: Config,
     pub client: OpenCodeGoClient,
     pub state: StateStore,
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    pub projects: HashMap<String, ProjectRuntime>,
     pub capacity: Arc<Semaphore>,
 }
 
@@ -48,10 +55,19 @@ async fn health() -> Json<Value> {
 }
 
 async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = authorize(&state.config, &headers) {
-        return *response;
-    }
-    match state.client.models().await {
+    let project_id = match authorize(&state, &headers) {
+        Ok(pid) => pid,
+        Err(response) => return *response,
+    };
+    let Some(runtime) = state.projects.get(&project_id) else {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "project_not_found",
+            "Project not found",
+        )
+        .into_response();
+    };
+    match runtime.client.models().await {
         Ok(raw) => {
             let rows = raw
                 .get("data")
@@ -73,10 +89,19 @@ async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
 }
 
 async fn responses(State(state): State<AppState>, headers: HeaderMap, body: String) -> Response {
-    if let Err(response) = authorize(&state.config, &headers) {
-        return *response;
-    }
-    if body.is_empty() || body.len() > state.config.max_request_bytes {
+    let project_id = match authorize(&state, &headers) {
+        Ok(pid) => pid,
+        Err(response) => return *response,
+    };
+    let Some(runtime) = state.projects.get(&project_id).cloned() else {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "project_not_found",
+            "Project not found",
+        )
+        .into_response();
+    };
+    if body.is_empty() || body.len() > runtime.config.max_request_bytes {
         return error_response(
             StatusCode::PAYLOAD_TOO_LARGE,
             "request_too_large",
@@ -102,13 +127,17 @@ async fn responses(State(state): State<AppState>, headers: HeaderMap, body: Stri
     };
 
     if body.get("stream").and_then(Value::as_bool).unwrap_or(false) {
-        stream_response(state, body).await
+        stream_response(runtime, state.capacity.clone(), body).await
     } else {
-        complete_response(state, body).await
+        complete_response(runtime, state.capacity.clone(), body).await
     }
 }
 
-async fn complete_response(state: AppState, body: Value) -> Response {
+async fn complete_response(
+    runtime: ProjectRuntime,
+    capacity: Arc<Semaphore>,
+    body: Value,
+) -> Response {
     let model_alias = match body.get("model").and_then(Value::as_str) {
         Some(model) => model.to_string(),
         None => {
@@ -131,7 +160,7 @@ async fn complete_response(state: AppState, body: Value) -> Response {
             )
         }
     };
-    let previous = match previous_response(&state, &body) {
+    let previous = match previous_response(&runtime.state, &body) {
         Ok(previous) => previous,
         Err(message) => {
             return responses_failed_response(&body, &model_alias, "invalid_tool_history", &message)
@@ -161,7 +190,7 @@ async fn complete_response(state: AppState, body: Value) -> Response {
             &message,
         );
     }
-    let permit = match state.capacity.clone().try_acquire_owned() {
+    let permit = match capacity.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
             return error_response(
@@ -171,7 +200,7 @@ async fn complete_response(state: AppState, body: Value) -> Response {
             )
         }
     };
-    let upstream = state.client.chat(payload).await;
+    let upstream = runtime.client.chat(payload).await;
     drop(permit);
     let upstream = match upstream {
         Ok(value) => value,
@@ -202,7 +231,7 @@ async fn complete_response(state: AppState, body: Value) -> Response {
         &model_upstream,
         &messages,
         &tool_ctx,
-        |item| state.state.put(&item),
+        |item| runtime.state.put(&item),
     ) {
         Ok(response) => Json(response).into_response(),
         Err(error) => responses_failed_response_with_status(
@@ -215,7 +244,11 @@ async fn complete_response(state: AppState, body: Value) -> Response {
     }
 }
 
-async fn stream_response(state: AppState, body: Value) -> Response {
+async fn stream_response(
+    runtime: ProjectRuntime,
+    capacity: Arc<Semaphore>,
+    body: Value,
+) -> Response {
     let model_alias = match body.get("model").and_then(Value::as_str) {
         Some(model) => model.to_string(),
         None => {
@@ -232,7 +265,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
             return early_stream_failed_response(body, model_alias, "invalid_model", message)
         }
     };
-    let previous = match previous_response(&state, &body) {
+    let previous = match previous_response(&runtime.state, &body) {
         Ok(previous) => previous,
         Err(message) => {
             return early_stream_failed_response(
@@ -262,7 +295,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
 
     if let Some(message) = find_unsupported_multimodal_input(&model_upstream, &payload) {
         return stream_failed_response(
-            state,
+            runtime,
             body,
             model_alias,
             model_upstream,
@@ -275,7 +308,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
 
     let (tx, rx) =
         tokio::sync::mpsc::unbounded_channel::<Result<axum::response::sse::Event, Infallible>>();
-    let state_for_task = state.clone();
+    let runtime_for_task = runtime.clone();
     tokio::spawn(async move {
         let emit_tx = tx.clone();
         let mut assembler = StreamAssembler::new(
@@ -284,7 +317,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
             model_upstream.clone(),
             messages,
             tool_ctx,
-            Box::new(move |item| state_for_task.state.put(&item)),
+            Box::new(move |item| runtime_for_task.state.put(&item)),
             Box::new(move |event, data| {
                 let sse = axum::response::sse::Event::default()
                     .event(event)
@@ -298,7 +331,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
             let _ = tx.send(Ok(axum::response::sse::Event::default().data("[DONE]")));
             return;
         }
-        let permit = match state.capacity.clone().try_acquire_owned() {
+        let permit = match capacity.clone().try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => {
                 if let Err(error) =
@@ -310,7 +343,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
                 return;
             }
         };
-        let upstream = state.client.chat_stream(payload).await;
+        let upstream = runtime_for_task.client.chat_stream(payload).await;
         drop(permit);
         match upstream {
             Ok(mut stream) => {
@@ -486,7 +519,7 @@ async fn stream_response(state: AppState, body: Value) -> Response {
 }
 
 fn previous_response(
-    state: &AppState,
+    state_store: &StateStore,
     body: &Value,
 ) -> Result<Option<crate::state::StoredResponse>, String> {
     let ids = function_output_call_ids(body).map_err(|e| e.to_string())?;
@@ -497,7 +530,7 @@ fn previous_response(
         .and_then(Value::as_str)
         .filter(|v| !v.is_empty())
     {
-        let previous = state.state.get(previous_id).map_err(|e| e.to_string())?;
+        let previous = state_store.get(previous_id).map_err(|e| e.to_string())?;
         if let Some(previous) = previous.as_ref() {
             validate_requested_call_ids(previous, &ids).map_err(|e| e.to_string())?;
         } else if !ids.is_empty() {
@@ -512,8 +545,7 @@ fn previous_response(
         return Ok(None);
     }
 
-    let previous = state
-        .state
+    let previous = state_store
         .find_by_call_ids(&ids)
         .map_err(|e| e.to_string())?;
     let Some(previous) = previous else {
@@ -526,24 +558,41 @@ fn previous_response(
     Ok(Some(previous))
 }
 
-fn authorize(config: &Config, headers: &HeaderMap) -> Result<(), Box<Response>> {
-    let Some(token) = config
-        .local_token
-        .as_ref()
-        .filter(|token| !token.is_empty())
-    else {
-        return Ok(());
-    };
-    let expected = format!("Bearer {token}");
-    if headers.get("authorization").and_then(|v| v.to_str().ok()) == Some(expected.as_str()) {
-        Ok(())
-    } else {
-        Err(Box::new(error_response(
+fn authorize(state: &AppState, headers: &HeaderMap) -> Result<String, Box<Response>> {
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| {
+            Box::new(error_response(
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "Missing Authorization header",
+            ))
+        })?;
+    let raw_token = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
+        Box::new(error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
-            "Unauthorized",
-        )))
+            "Invalid Authorization format",
+        ))
+    })?;
+    // Try HMAC-signed token
+    if let Some(pid) = parse_project_id_from_token(raw_token) {
+        if let Some(runtime) = state.projects.get(&pid) {
+            if let Some(ref local_token) = runtime.config.local_token {
+                if !local_token.is_empty()
+                    && validate_signed_token(raw_token, local_token).is_some()
+                {
+                    return Ok(pid);
+                }
+            }
+        }
     }
+    Err(Box::new(error_response(
+        StatusCode::UNAUTHORIZED,
+        "unauthorized",
+        "Unauthorized",
+    )))
 }
 
 fn strip_model_prefix(model: &str) -> Result<String, &'static str> {
@@ -625,7 +674,7 @@ fn early_stream_failed_response(
 }
 
 fn stream_failed_response(
-    state: AppState,
+    runtime: ProjectRuntime,
     body: Value,
     model_alias: String,
     model_upstream: String,
@@ -637,14 +686,14 @@ fn stream_failed_response(
     let (tx, rx) =
         tokio::sync::mpsc::unbounded_channel::<Result<axum::response::sse::Event, Infallible>>();
     let emit_tx = tx.clone();
-    let state_for_emit = state.clone();
+    let runtime_for_emit = runtime.clone();
     let mut assembler = StreamAssembler::new(
         body,
         model_alias,
         model_upstream,
         messages,
         tool_ctx,
-        Box::new(move |item| state_for_emit.state.put(&item)),
+        Box::new(move |item| runtime_for_emit.state.put(&item)),
         Box::new(move |event, data| {
             let sse = axum::response::sse::Event::default()
                 .event(event)
