@@ -50,6 +50,8 @@ cargo run -- start
 
 `check` 主要用于排障，`auth print-local-token` 主要给 provider auth helper 调用，不是日常手工入口。
 
+> 项目配置查找会从当前目录向祖先目录逐级搜索，因此在非仓库根目录启动时 `auth print-local-token` 和 provider auth 也能稳定工作。当 Codex 线程会话上下文可用时，适配器还会从 Codex 本地状态恢复项目 cwd，进一步避免初始化误判。
+
 ## 1. 配置分层
 
 | 配置 | 正确位置 | 作用 |

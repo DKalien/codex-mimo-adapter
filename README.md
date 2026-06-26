@@ -73,6 +73,7 @@ Edit that file when you need to change the stored API key, port, token, or SQLit
 
 Runtime precedence is `CLI flags > .codex-opencode-adapter.env > process environment > defaults`.
 For available variables see the [Environment variables](#environment-variables) table below.
+Project config lookup traverses ancestor directories from the current working directory, so `auth print-local-token` and provider auth work reliably when the adapter is launched from a subdirectory. When a Codex thread session is active, the adapter also recovers the project working directory from local thread state, reducing false `project is not initialized` errors.
 
 ### Sanity check
 

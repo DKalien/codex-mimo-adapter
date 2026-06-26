@@ -51,6 +51,43 @@ fn init_writes_project_files_and_auth_prints_local_token() {
     let auth_output = sandbox.run(["auth", "print-local-token"]);
     assert_success(&auth_output);
     assert_eq!(stdout(&auth_output).trim(), token);
+
+    let nested_dir = sandbox.project().join("src").join("nested");
+    fs::create_dir_all(&nested_dir).unwrap();
+    let nested_auth_output = sandbox.run_in(&nested_dir, ["auth", "print-local-token"]);
+    assert_success(&nested_auth_output);
+    assert_eq!(stdout(&nested_auth_output).trim(), token);
+
+    let external_dir = sandbox.root().join("external");
+    fs::create_dir_all(&external_dir).unwrap();
+    sandbox.write_process_manager(&token, "thread-from-process-manager");
+    let external_auth_output = sandbox.run_in_with_env(
+        &external_dir,
+        ["auth", "print-local-token"],
+        [("CODEX_THREAD_ID", "thread-from-process-manager")],
+    );
+    assert_success(&external_auth_output);
+    assert_eq!(stdout(&external_auth_output).trim(), token);
+
+    let ambient_process_auth_output =
+        sandbox.run_in(&external_dir, ["auth", "print-local-token"]);
+    assert_success(&ambient_process_auth_output);
+    assert_eq!(stdout(&ambient_process_auth_output).trim(), token);
+
+    fs::remove_file(sandbox.process_manager_path()).unwrap();
+    sandbox.write_session_meta("thread-from-session-meta");
+    let session_auth_output = sandbox.run_in_with_env(
+        &external_dir,
+        ["auth", "print-local-token"],
+        [("CODEX_THREAD_ID", "thread-from-session-meta")],
+    );
+    assert_success(&session_auth_output);
+    assert_eq!(stdout(&session_auth_output).trim(), token);
+
+    let ambient_session_auth_output =
+        sandbox.run_in(&external_dir, ["auth", "print-local-token"]);
+    assert_success(&ambient_session_auth_output);
+    assert_eq!(stdout(&ambient_session_auth_output).trim(), token);
 }
 
 #[test]
@@ -237,20 +274,84 @@ impl TestSandbox {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
+        self.run_in(&self.project, args)
+    }
+
+    fn run_in<I, S>(&self, current_dir: &Path, args: I) -> Output
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.run_in_with_env(current_dir, args, std::iter::empty::<(&str, &str)>())
+    }
+
+    fn run_in_with_env<I, S, J, K, V>(&self, current_dir: &Path, args: I, envs: J) -> Output
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        J: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
         let mut command = Command::new(binary_path());
         for arg in args {
             command.arg(arg.as_ref());
         }
+        for (key, value) in envs {
+            command.env(key.as_ref(), value.as_ref());
+        }
         command
-            .current_dir(&self.project)
+            .current_dir(current_dir)
             .env("USERPROFILE", &self.home)
             .env("HOME", &self.home)
             .output()
             .unwrap()
     }
 
+    fn write_process_manager(&self, token: &str, thread_id: &str) {
+        let content = format!(
+            "[{{\"conversationId\":\"{thread_id}\",\"cwd\":\"{}\",\"command\":\"auth\",\"itemId\":\"call_1\",\"updatedAtMs\":1}}]",
+            escape_json_path(self.project())
+        );
+        let path = self.process_manager_path();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+
+        let env_path = self.project().join(".codex-opencode-adapter.env");
+        let env_text = fs::read_to_string(&env_path).unwrap();
+        assert!(env_text.contains(token));
+    }
+
+    fn write_session_meta(&self, thread_id: &str) {
+        let session_path = self
+            .home()
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("06")
+            .join("26")
+            .join(format!("rollout-{thread_id}.jsonl"));
+        fs::create_dir_all(session_path.parent().unwrap()).unwrap();
+        let content = format!(
+            "{{\"timestamp\":\"2026-06-26T09:09:30.375Z\",\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{thread_id}\",\"id\":\"child-thread\",\"cwd\":\"{}\"}}}}\n",
+            escape_json_path(self.project())
+        );
+        fs::write(session_path, content).unwrap();
+    }
+
+    fn process_manager_path(&self) -> PathBuf {
+        self.home()
+            .join(".codex")
+            .join("process_manager")
+            .join("chat_processes.json")
+    }
+
     fn project(&self) -> &Path {
         &self.project
+    }
+
+    fn root(&self) -> &Path {
+        &self.root
     }
 
     fn home(&self) -> &Path {
@@ -283,4 +384,8 @@ fn stdout(output: &Output) -> String {
 
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+fn escape_json_path(path: &Path) -> String {
+    path.display().to_string().replace('\\', "\\\\")
 }
