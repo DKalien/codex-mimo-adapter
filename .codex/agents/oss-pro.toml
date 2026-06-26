@@ -4,10 +4,10 @@
 #
 # Reference: https://developers.openai.com/codex/subagents
 
-name = "oss_glm"
-description = "GLM worker for complex text tasks, review, and synthesis."
+name = "oss_pro"
+description = "DeepSeek Pro worker for complex text tasks, review, and synthesis."
 model_provider = "opencode_go_adapter"
-model = "opencode-go/glm-5.2"
+model = "opencode-go/deepseek-v4-pro"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 
