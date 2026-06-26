@@ -21,7 +21,10 @@ use crate::media_guard::{
     find_unsupported_multimodal_input, is_multimodal_unsupported_error,
     unsupported_multimodal_error_message,
 };
-use crate::project::{current_environment, parse_project_id_from_token, read_project_env, registry_dir_path, validate_signed_token, ProjectRegistry, PROJECT_ENV_FILENAME};
+use crate::project::{
+    current_environment, project_id_from_key, project_key_from_id, read_project_env,
+    registry_dir_path, validate_adapter_token, ProjectRegistry, PROJECT_ENV_FILENAME,
+};
 use crate::state::{now_ts, StateStore};
 use crate::upstream::{
     extract_error_message, parse_chat_sse_bytes, sse_data_from_block, sse_event_from_block,
@@ -58,69 +61,44 @@ async fn health() -> Json<Value> {
 }
 
 async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let runtime = {
+    let runtimes = {
         let projects = state.projects.read().unwrap();
-        let project_id = match authorize(&projects, &headers) {
-            Ok(pid) => pid,
-            Err(response) => return *response,
-        };
-        match projects.get(&project_id) {
-            Some(r) => r.clone(),
-            None => {
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "project_not_found",
-                    &format!("Project {project_id} is registered but not loaded. Call POST /admin/refresh to reload."),
-                ).into_response();
-            }
+        if let Err(response) = authorize_adapter(&projects, &headers) {
+            return *response;
         }
+        projects
+            .iter()
+            .map(|(project_id, runtime)| (project_id.clone(), runtime.clone()))
+            .collect::<Vec<_>>()
     };
-    match runtime.client.models().await {
-        Ok(raw) => {
-            let rows = raw
-                .get("data")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            let data = rows
-                .into_iter()
-                .filter_map(|row| {
+
+    let mut data = Vec::new();
+    for (project_id, runtime) in runtimes {
+        match runtime.client.models().await {
+            Ok(raw) => {
+                let rows = raw
+                    .get("data")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let project_key = project_key_from_id(&project_id);
+                data.extend(rows.into_iter().filter_map(|row| {
                     row.get("id").and_then(Value::as_str).map(|id| {
-                        json!({"id":format!("opencode-go/{id}"),"object":"model","owned_by":"opencode-go"})
+                        json!({
+                            "id":format!("opencode_adapter/{project_key}/opencode-go/{id}"),
+                            "object":"model",
+                            "owned_by":"opencode-go"
+                        })
                     })
-                })
-                .collect::<Vec<_>>();
-            Json(json!({"object":"list","data":data})).into_response()
+                }));
+            }
+            Err(error) => return upstream_error(error),
         }
-        Err(error) => upstream_error(error),
     }
+    Json(json!({"object":"list","data":data})).into_response()
 }
 
 async fn responses(State(state): State<AppState>, headers: HeaderMap, body: String) -> Response {
-    let runtime = {
-        let projects = state.projects.read().unwrap();
-        let project_id = match authorize(&projects, &headers) {
-            Ok(pid) => pid,
-            Err(response) => return *response,
-        };
-        match projects.get(&project_id) {
-            Some(r) => r.clone(),
-            None => {
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "project_not_found",
-                    &format!("Project {project_id} is registered but not loaded. Call POST /admin/refresh to reload."),
-                ).into_response();
-            }
-        }
-    };
-    if body.is_empty() || body.len() > runtime.config.max_request_bytes {
-        return error_response(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "request_too_large",
-            "Invalid request size",
-        );
-    }
     let body: Value = match serde_json::from_str(&body) {
         Ok(value @ Value::Object(_)) => value,
         Ok(_) => {
@@ -138,19 +116,6 @@ async fn responses(State(state): State<AppState>, headers: HeaderMap, body: Stri
             )
         }
     };
-
-    if body.get("stream").and_then(Value::as_bool).unwrap_or(false) {
-        stream_response(runtime, state.capacity.clone(), body).await
-    } else {
-        complete_response(runtime, state.capacity.clone(), body).await
-    }
-}
-
-async fn complete_response(
-    runtime: ProjectRuntime,
-    capacity: Arc<Semaphore>,
-    body: Value,
-) -> Response {
     let model_alias = match body.get("model").and_then(Value::as_str) {
         Some(model) => model.to_string(),
         None => {
@@ -161,8 +126,8 @@ async fn complete_response(
             )
         }
     };
-    let model_upstream = match strip_model_prefix(&model_alias) {
-        Ok(model) => model,
+    let (project_id, model_upstream) = match parse_routed_model(&model_alias) {
+        Ok(route) => route,
         Err(message) => {
             return responses_failed_response_with_status(
                 StatusCode::BAD_REQUEST,
@@ -173,6 +138,60 @@ async fn complete_response(
             )
         }
     };
+
+    let runtime = {
+        let projects = state.projects.read().unwrap();
+        if let Err(response) = authorize_adapter(&projects, &headers) {
+            return *response;
+        }
+        match projects.get(&project_id) {
+            Some(r) => r.clone(),
+            None => {
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "project_not_found",
+                    &format!(
+                        "Project route {project_id} is not loaded. Run 'codex-opencode-adapter init' for that project and call POST /admin/refresh."
+                    ),
+                ).into_response();
+            }
+        }
+    };
+    if body.to_string().len() > runtime.config.max_request_bytes {
+        return error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "request_too_large",
+            "Invalid request size",
+        );
+    }
+    if body.get("stream").and_then(Value::as_bool).unwrap_or(false) {
+        stream_response(
+            runtime,
+            state.capacity.clone(),
+            body,
+            model_alias,
+            model_upstream,
+        )
+        .await
+    } else {
+        complete_response(
+            runtime,
+            state.capacity.clone(),
+            body,
+            model_alias,
+            model_upstream,
+        )
+        .await
+    }
+}
+
+async fn complete_response(
+    runtime: ProjectRuntime,
+    capacity: Arc<Semaphore>,
+    body: Value,
+    model_alias: String,
+    model_upstream: String,
+) -> Response {
     let previous = match previous_response(&runtime.state, &body) {
         Ok(previous) => previous,
         Err(message) => {
@@ -261,23 +280,9 @@ async fn stream_response(
     runtime: ProjectRuntime,
     capacity: Arc<Semaphore>,
     body: Value,
+    model_alias: String,
+    model_upstream: String,
 ) -> Response {
-    let model_alias = match body.get("model").and_then(Value::as_str) {
-        Some(model) => model.to_string(),
-        None => {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "invalid_request_error",
-                "model is required",
-            )
-        }
-    };
-    let model_upstream = match strip_model_prefix(&model_alias) {
-        Ok(model) => model,
-        Err(message) => {
-            return early_stream_failed_response(body, model_alias, "invalid_model", message)
-        }
-    };
     let previous = match previous_response(&runtime.state, &body) {
         Ok(previous) => previous,
         Err(message) => {
@@ -571,10 +576,10 @@ fn previous_response(
     Ok(Some(previous))
 }
 
-fn authorize(
+fn authorize_adapter(
     projects: &HashMap<String, ProjectRuntime>,
     headers: &HeaderMap,
-) -> Result<String, Box<Response>> {
+) -> Result<(), Box<Response>> {
     let auth_header = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -592,22 +597,17 @@ fn authorize(
             "Invalid Authorization format. Expected 'Bearer <token>'.",
         ))
     })?;
-    // Try HMAC-signed token
-    if let Some(pid) = parse_project_id_from_token(raw_token) {
-        if let Some(runtime) = projects.get(&pid) {
-            if let Some(ref local_token) = runtime.config.local_token {
-                if !local_token.is_empty()
-                    && validate_signed_token(raw_token, local_token).is_some()
-                {
-                    return Ok(pid);
-                }
+    for runtime in projects.values() {
+        if let Some(ref local_token) = runtime.config.local_token {
+            if !local_token.is_empty() && validate_adapter_token(raw_token, local_token) {
+                return Ok(());
             }
         }
     }
     Err(Box::new(error_response(
         StatusCode::UNAUTHORIZED,
         "unauthorized",
-        "Invalid or expired token. Make sure you are using the correct LOCAL_TOKEN for this project.",
+        "Invalid or expired adapter token. Run 'codex-opencode-adapter auth print-local-token' again.",
     )))
 }
 
@@ -615,16 +615,16 @@ async fn admin_refresh(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Response {
-    // Auth: accept any valid project bearer token
+    // Auth: accept any valid adapter bearer token.
     let auth_ok = {
         let projects = state.projects.read().unwrap();
-        authorize(&projects, &headers).is_ok()
+        authorize_adapter(&projects, &headers).is_ok()
     };
     if !auth_ok {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
-            "Invalid or missing token. Provide a valid project bearer token.",
+            "Invalid or missing token. Provide a valid adapter bearer token.",
         );
     }
     let reg_dir = match registry_dir_path() {
@@ -692,15 +692,26 @@ async fn admin_refresh(
 }
 
 
-fn strip_model_prefix(model: &str) -> Result<String, &'static str> {
-    let Some(rest) = model.strip_prefix("opencode-go/") else {
-        return Err("model must use the opencode-go/ prefix");
+fn parse_routed_model(model: &str) -> Result<(String, String), &'static str> {
+    let Some(rest) = model.strip_prefix("opencode_adapter/") else {
+        return Err("model must use opencode_adapter/<project_key>/<real_model>. Run 'codex-opencode-adapter init' to refresh agent templates.");
     };
-    if rest.is_empty() {
-        Err("model id is empty")
-    } else {
-        Ok(rest.to_string())
+    let Some((project_key, real_model)) = rest.split_once('/') else {
+        return Err("model must include both project_key and real_model");
+    };
+    if project_key.is_empty() {
+        return Err("project_key is empty");
     }
+    if real_model.is_empty() {
+        return Err("real model id is empty");
+    }
+    let Some(upstream_model) = real_model.strip_prefix("opencode-go/") else {
+        return Err("real_model must use the opencode-go/ prefix");
+    };
+    if upstream_model.is_empty() {
+        return Err("real model id is empty");
+    }
+    Ok((project_id_from_key(project_key), upstream_model.to_string()))
 }
 
 fn error_response(status: StatusCode, kind: &str, message: &str) -> Response {
@@ -852,3 +863,6 @@ fn upstream_error(error: UpstreamError) -> Response {
         }
     }
 }
+
+
+

@@ -81,7 +81,7 @@ async fn post_nonstream_request(
     client
         .post(format!("http://{adapter_addr}/v1/responses"))
         .json(&json!({
-            "model": "opencode-go/deepseek-v4-flash",
+            "model": "opencode_adapter/test_conc/opencode-go/deepseek-v4-flash",
             "input": marker,
             "stream": false,
         }))
@@ -189,9 +189,9 @@ async fn start_adapter(
         "concurrency_limit_regression_{}.sqlite",
         Uuid::new_v4()
     ));
-    let project_id = "test-conc".to_string();
+    let project_id = "opencode_adapter_test_conc".to_string();
     let raw_token = format!("codex-conc-raw-{}", Uuid::new_v4().simple());
-    let signed_token = codex_opencode_adapter::project::sign_local_token(&project_id, &raw_token);
+    let signed_token = codex_opencode_adapter::project::sign_adapter_token(&raw_token);
     let config = Config {
         host: "127.0.0.1".to_string(),
         port: 0,

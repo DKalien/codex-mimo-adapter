@@ -6,12 +6,11 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const PROJECT_ENV_FILENAME: &str = ".codex-opencode-adapter.env";
 const REGISTRY_FILENAME: &str = "project-registry.toml";
-const ACTIVE_PROJECT_FILENAME: &str = "active-project.toml";
-const ACTIVE_PROJECT_TTL_SECONDS: i64 = 300;
+const ADAPTER_TOKEN_SUBJECT: &str = "adapter";
+const PROJECT_ID_PREFIX: &str = "opencode_adapter_";
 
 /// Generate a deterministic short hex hash from an input string.
 pub fn hex_hash(input: &str) -> String {
@@ -29,15 +28,27 @@ pub fn hex_hash(input: &str) -> String {
 pub fn generate_project_id(root: &Path) -> String {
     let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let hash = hex_hash(&canonical.display().to_string());
-    format!("opencode_adapter_{hash}")
+    format!("{PROJECT_ID_PREFIX}{hash}")
 }
 
-/// Sign a project_id into a bearer token using HMAC-SHA256.
-/// Token format: codex-opencode-<project_id>-<hex_hmac>
-pub fn sign_local_token(project_id: &str, secret: &str) -> String {
+pub fn project_key_from_id(project_id: &str) -> &str {
+    project_id
+        .strip_prefix(PROJECT_ID_PREFIX)
+        .unwrap_or(project_id)
+}
+
+pub fn project_id_from_key(project_key: &str) -> String {
+    if project_key.starts_with(PROJECT_ID_PREFIX) {
+        project_key.to_string()
+    } else {
+        format!("{PROJECT_ID_PREFIX}{project_key}")
+    }
+}
+
+fn sign_subject(subject: &str, secret: &str) -> String {
     type HmacSha256 = Hmac<Sha256>;
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC key should be valid");
-    mac.update(project_id.as_bytes());
+    mac.update(subject.as_bytes());
     let result = mac.finalize();
     let hmac_bytes = result.into_bytes();
     let hmac_hex: String = hmac_bytes
@@ -45,34 +56,17 @@ pub fn sign_local_token(project_id: &str, secret: &str) -> String {
         .take(16)
         .map(|b| format!("{b:02x}"))
         .collect();
-    format!("codex-opencode-{project_id}-{hmac_hex}")
+    format!("codex-opencode-{subject}-{hmac_hex}")
 }
 
-/// Parse and validate a signed token.
-/// Returns the project_id if valid, None otherwise.
-pub fn validate_signed_token(token: &str, secret: &str) -> Option<String> {
-    let prefix = "codex-opencode-";
-    let rest = token.strip_prefix(prefix)?;
-    let hyphen_pos = rest.rfind('-')?;
-    let project_id = &rest[..hyphen_pos];
-    let received_hmac = &rest[hyphen_pos + 1..];
-    let expected = sign_local_token(project_id, secret);
-    let expected_rest = expected.strip_prefix(prefix)?;
-    let expected_hmac = &expected_rest[project_id.len() + 1..];
-    if received_hmac == expected_hmac {
-        Some(project_id.to_string())
-    } else {
-        None
-    }
+/// Sign an adapter-scoped bearer token using HMAC-SHA256.
+/// Token format: codex-opencode-adapter-<hex_hmac>
+pub fn sign_adapter_token(secret: &str) -> String {
+    sign_subject(ADAPTER_TOKEN_SUBJECT, secret)
 }
 
-/// Parse a candidate project_id from a signed token WITHOUT validation.
-/// Used by authorize to select which project secret to validate against.
-pub fn parse_project_id_from_token(token: &str) -> Option<String> {
-    let prefix = "codex-opencode-";
-    let rest = token.strip_prefix(prefix)?;
-    let hyphen_pos = rest.rfind('-')?;
-    Some(rest[..hyphen_pos].to_string())
+pub fn validate_adapter_token(token: &str, secret: &str) -> bool {
+    token == sign_adapter_token(secret)
 }
 
 // --------------------------------------------------------------------------
@@ -87,13 +81,6 @@ pub struct ProjectRegistryEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProjectRegistry {
     pub projects: HashMap<String, ProjectRegistryEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ActiveProject {
-    project_id: String,
-    #[serde(default)]
-    updated_at: Option<i64>,
 }
 
 impl ProjectRegistryEntry {
@@ -200,42 +187,6 @@ impl ProjectPaths {
     }
 
 
-}
-
-pub fn remember_active_project(root: &Path) -> anyhow::Result<()> {
-    let paths = ProjectPaths::discover_from(root);
-    validate_recovered_project(&paths)?;
-    let project_env = read_project_env(&paths.env_file)?;
-    let project_id = project_env
-        .get("CODEX_OPENCODE_PROJECT_ID")
-        .ok_or_else(|| anyhow!("CODEX_OPENCODE_PROJECT_ID is missing in project env"))?;
-    let registry_dir = registry_dir_path()?;
-    fs::create_dir_all(&registry_dir)?;
-    let active = ActiveProject {
-        project_id: project_id.to_string(),
-        updated_at: Some(now_ts()),
-    };
-    let contents = toml_edit::ser::to_string_pretty(&active)?;
-    fs::write(registry_dir.join(ACTIVE_PROJECT_FILENAME), contents)?;
-    Ok(())
-}
-
-fn now_ts() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
-fn active_project_root(registry: &ProjectRegistry) -> Option<PathBuf> {
-    let registry_dir = registry_dir_path().ok()?;
-    let contents = fs::read_to_string(registry_dir.join(ACTIVE_PROJECT_FILENAME)).ok()?;
-    let active: ActiveProject = toml_edit::de::from_str(&contents).ok()?;
-    let updated_at = active.updated_at?;
-    if now_ts().saturating_sub(updated_at) > ACTIVE_PROJECT_TTL_SECONDS {
-        return None;
-    }
-    registry.resolve_root(&active.project_id)
 }
 
 fn codex_thread_ids() -> Vec<String> {
@@ -392,16 +343,7 @@ pub fn resolve_project() -> anyhow::Result<ProjectPaths> {
         }
     }
 
-    // Priority 4: Short-lived active project marker. This exists for Codex
-    // provider auth calls that currently run without cwd/thread context.
-    if let Some(root) = active_project_root(&registry) {
-        let paths = ProjectPaths::from_root(root);
-        validate_recovered_project(&paths)?;
-        tracing::info!("using recently active project for context-free provider auth");
-        return Ok(paths);
-    }
-
-    // Priority 5: Constrained fallback -- single registered project only
+    // Priority 4: Constrained fallback -- single registered project only
     if registry.projects.is_empty() {
         return Err(anyhow!(
             concat!(

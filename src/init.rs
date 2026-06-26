@@ -3,7 +3,7 @@ use crate::config::{
     DEFAULT_HOST, DEFAULT_MAX_CONCURRENCY, DEFAULT_MAX_REQUEST_BYTES, DEFAULT_STATE_DB,
     DEFAULT_STATE_TTL_SECONDS, DEFAULT_TIMEOUT_SECONDS,
 };
-use crate::project::{generate_project_id, ProjectPaths, ProjectRegistry};
+use crate::project::{generate_project_id, project_key_from_id, ProjectPaths, ProjectRegistry};
 use anyhow::{anyhow, Context};
 
 use std::fs::{self, OpenOptions};
@@ -67,25 +67,27 @@ pub fn run_init(args: InitArgs) -> anyhow::Result<()> {
     registry.save(&user_dir()?)?;
     logger.log(&format!("registered project {project_id}"))?;
 
-    // Agent templates always use the fixed opencode_go_adapter provider name.
+    // Agent templates always use the fixed opencode_go_adapter provider name,
+    // while model carries the project route consumed by the adapter.
+    let project_key = project_key_from_id(&project_id);
     let writes = vec![
         PendingWrite::new(global_config_path, global_config_contents.into_bytes()),
         PendingWrite::new(project.env_file.clone(), env_contents.into_bytes()),
         PendingWrite::new(
             project.agents_dir.join("oss-flash.toml"),
-            OSS_FLASH_TEMPLATE.as_bytes().to_vec(),
+            route_agent_template(OSS_FLASH_TEMPLATE, project_key)?.into_bytes(),
         ),
         PendingWrite::new(
             project.agents_dir.join("oss-mimo.toml"),
-            OSS_MIMO_TEMPLATE.as_bytes().to_vec(),
+            route_agent_template(OSS_MIMO_TEMPLATE, project_key)?.into_bytes(),
         ),
         PendingWrite::new(
             project.agents_dir.join("oss-minimax.toml"),
-            OSS_MINIMAX_TEMPLATE.as_bytes().to_vec(),
+            route_agent_template(OSS_MINIMAX_TEMPLATE, project_key)?.into_bytes(),
         ),
         PendingWrite::new(
             project.agents_dir.join("oss-pro.toml"),
-            OSS_PRO_TEMPLATE.as_bytes().to_vec(),
+            route_agent_template(OSS_PRO_TEMPLATE, project_key)?.into_bytes(),
         ),
     ];
 
@@ -111,6 +113,22 @@ fn prompt(label: &str) -> anyhow::Result<String> {
         return Err(anyhow!("{label} is required"));
     }
     Ok(value)
+}
+
+fn route_agent_template(template: &str, project_key: &str) -> anyhow::Result<String> {
+    let mut document = template
+        .parse::<DocumentMut>()
+        .context("failed to parse embedded agent template")?;
+    let model = document
+        .get("model")
+        .and_then(Item::as_str)
+        .ok_or_else(|| anyhow!("agent template is missing model"))?;
+    anyhow::ensure!(
+        model.starts_with("opencode-go/"),
+        "agent template model must use the opencode-go/ prefix"
+    );
+    document["model"] = value(format!("opencode_adapter/{project_key}/{model}"));
+    Ok(document.to_string())
 }
 
 fn global_codex_config_path() -> anyhow::Result<PathBuf> {

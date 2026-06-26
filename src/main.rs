@@ -5,8 +5,8 @@ use codex_opencode_adapter::config::{
 };
 use codex_opencode_adapter::init::run_init;
 use codex_opencode_adapter::project::{
-    current_environment, read_project_env, registry_dir_path, remember_active_project,
-    sign_local_token, ProjectPaths, ProjectRegistry, PROJECT_ENV_FILENAME,
+    current_environment, read_project_env, registry_dir_path, sign_adapter_token, ProjectPaths,
+    ProjectRegistry, PROJECT_ENV_FILENAME,
 };
 use codex_opencode_adapter::server::{router, AppState, ProjectRuntime};
 use codex_opencode_adapter::state::StateStore;
@@ -28,20 +28,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Check => run_check().await,
         Commands::Auth(args) => match args.command {
             AuthCommands::PrintLocalToken => {
-                let config = load_project_config(RunArgs::default())?;
-                let token = config
-                    .local_token
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| anyhow::anyhow!("CODEX_OPENCODE_LOCAL_TOKEN is missing"))?;
-                let project = ProjectPaths::from_current_dir()
-                    .map_err(|_| anyhow::anyhow!("project env not found"))?;
-                let _ = remember_active_project(&project.root);
-                let project_env = read_project_env(&project.env_file)?;
-                let project_id = project_env
-                    .get("CODEX_OPENCODE_PROJECT_ID")
-                    .ok_or_else(|| anyhow::anyhow!("CODEX_OPENCODE_PROJECT_ID is missing"))?;
-                let signed = codex_opencode_adapter::project::sign_local_token(project_id, &token);
-                println!("{signed}");
+                let token = load_adapter_token_secret()?;
+                println!("{}", sign_adapter_token(&token));
                 Ok(())
             }
         },
@@ -49,9 +37,6 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_server(args: RunArgs) -> anyhow::Result<()> {
-    if let Ok(cwd) = std::env::current_dir() {
-        let _ = remember_active_project(&cwd);
-    }
     let reg_dir = registry_dir_path()?;
     let registry = ProjectRegistry::load(&reg_dir);
     if registry.projects.is_empty() {
@@ -142,19 +127,12 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
 
 async fn run_check() -> anyhow::Result<()> {
     let config = load_project_config(RunArgs::default())?;
-    // Sign the local token with project_id for HMAC validation
-    let project = ProjectPaths::from_current_dir()?;
-    let _ = remember_active_project(&project.root);
-    let project_env = read_project_env(&project.env_file)?;
-    let project_id = project_env
-        .get("CODEX_OPENCODE_PROJECT_ID")
-        .ok_or_else(|| anyhow::anyhow!("CODEX_OPENCODE_PROJECT_ID is missing in project env"))?;
     let raw_token = config
         .local_token
         .as_deref()
         .filter(|v| !v.is_empty())
         .ok_or_else(|| anyhow::anyhow!("CODEX_OPENCODE_LOCAL_TOKEN is missing"))?;
-    let signed_token = sign_local_token(project_id, raw_token);
+    let signed_token = sign_adapter_token(raw_token);
 
     let base = format!("http://{}:{}", config.host, config.port);
     let client = reqwest::Client::new();
@@ -175,6 +153,45 @@ async fn run_check() -> anyhow::Result<()> {
     anyhow::ensure!(models.status().is_success(), "/v1/models check failed");
     println!("Adapter check passed.");
     Ok(())
+}
+
+fn load_adapter_token_secret() -> anyhow::Result<String> {
+    if let Ok(cwd) = std::env::current_dir() {
+        let paths = ProjectPaths::discover_from(&cwd);
+        if paths.env_file.exists() {
+            let project_env = read_project_env(&paths.env_file)?;
+            if let Some(token) = project_env
+                .get("CODEX_OPENCODE_LOCAL_TOKEN")
+                .filter(|value| !value.is_empty())
+            {
+                return Ok(token.to_string());
+            }
+        }
+    }
+
+    let registry = ProjectRegistry::load(&registry_dir_path()?);
+    let mut project_ids = registry.projects.keys().cloned().collect::<Vec<_>>();
+    project_ids.sort();
+    for project_id in project_ids {
+        let Some(root) = registry.resolve_root(&project_id) else {
+            continue;
+        };
+        let env_path = root.join(PROJECT_ENV_FILENAME);
+        if !env_path.exists() {
+            continue;
+        }
+        let project_env = read_project_env(&env_path)?;
+        if let Some(token) = project_env
+            .get("CODEX_OPENCODE_LOCAL_TOKEN")
+            .filter(|value| !value.is_empty())
+        {
+            return Ok(token.to_string());
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "CODEX_OPENCODE_LOCAL_TOKEN is missing. Run 'codex-opencode-adapter init' from a project root first."
+    ))
 }
 
 fn load_project_config(args: RunArgs) -> anyhow::Result<Config> {

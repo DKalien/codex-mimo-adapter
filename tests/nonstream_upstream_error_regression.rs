@@ -27,7 +27,7 @@ async fn nonstream_upstream_http_error_returns_responses_failed_body() {
     let resp = adapter_client
         .post(format!("http://{adapter_addr}/v1/responses"))
         .json(&json!({
-            "model": "opencode-go/deepseek-v4-flash",
+            "model": "opencode_adapter/test_nons/opencode-go/deepseek-v4-flash",
             "input": "Hello",
             "stream": false,
             "metadata": {"case": "nonstream-upstream-error"}
@@ -41,7 +41,7 @@ async fn nonstream_upstream_http_error_returns_responses_failed_body() {
 
     assert_eq!(body["object"], "response");
     assert_eq!(body["status"], "failed");
-    assert_eq!(body["model"], "opencode-go/deepseek-v4-flash");
+    assert_eq!(body["model"], "opencode_adapter/test_nons/opencode-go/deepseek-v4-flash");
     assert_eq!(body["metadata"]["case"], "nonstream-upstream-error");
     assert!(body["output"].as_array().unwrap().is_empty());
     assert_eq!(body["usage"]["input_tokens"], 0);
@@ -97,9 +97,9 @@ async fn start_adapter(upstream_addr: SocketAddr) -> (SocketAddr, String, reqwes
         "nonstream_upstream_error_{}.sqlite",
         Uuid::new_v4()
     ));
-    let project_id = "test-nons".to_string();
+    let project_id = "opencode_adapter_test_nons".to_string();
     let raw_token = format!("codex-nons-raw-{}", Uuid::new_v4().simple());
-    let signed_token = codex_opencode_adapter::project::sign_local_token(&project_id, &raw_token);
+    let signed_token = codex_opencode_adapter::project::sign_adapter_token(&raw_token);
     let config = Config {
         host: "127.0.0.1".to_string(),
         port: 0,

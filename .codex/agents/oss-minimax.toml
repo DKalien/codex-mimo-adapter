@@ -7,7 +7,7 @@
 name = "oss_minimax"
 description = "Minimax multimodal worker for screenshots, UI, images, and other visual materials, with text capability as support."
 model_provider = "opencode_go_adapter"
-model = "opencode-go/minimax-m3"
+model = "opencode_adapter/c8b0cfc9ca15/opencode-go/minimax-m3"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 

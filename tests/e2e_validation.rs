@@ -1,12 +1,12 @@
 ﻿mod common;
 
 use codex_opencode_adapter::config::Config;
-use codex_opencode_adapter::project::sign_local_token;
+use codex_opencode_adapter::project::sign_adapter_token;
 use codex_opencode_adapter::server::{self, AppState, ProjectRuntime};
 use codex_opencode_adapter::state::StateStore;
 use codex_opencode_adapter::upstream::OpenCodeGoClient;
 use common::mock_upstream::start_mock_upstream;
-use common::{adapter_url, start_adapter};
+use common::{adapter_url, routed_model, start_adapter};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -22,7 +22,7 @@ async fn test_e2e_request_payload_shape() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": "opencode-go/deepseek-v4-flash",
+            "model": routed_model("opencode-go/deepseek-v4-flash"),
             "instructions": "You are a helpful assistant.",
             "input": [{"type": "message", "role": "user", "content": "Hi"}],
             "stream": false
@@ -78,7 +78,7 @@ async fn test_e2e_request_payload_streaming_shape() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": "opencode-go/deepseek-v4-flash",
+            "model": routed_model("opencode-go/deepseek-v4-flash"),
             "input": "Hi",
             "stream": true
         }))
@@ -116,7 +116,7 @@ async fn test_e2e_auth_required() {
     let resp = unauth_client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": "opencode-go/deepseek-v4-flash",
+            "model": routed_model("opencode-go/deepseek-v4-flash"),
             "input": "Hello",
             "stream": false
         }))
@@ -130,7 +130,7 @@ async fn test_e2e_auth_required() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": "opencode-go/deepseek-v4-flash",
+            "model": routed_model("opencode-go/deepseek-v4-flash"),
             "input": "Hello",
             "stream": false
         }))
@@ -145,12 +145,12 @@ async fn test_e2e_missing_model_prefix() {
     let (upstream_addr, _mock, _received) = start_mock_upstream().await;
     let adapter = start_adapter(upstream_addr, None).await;
 
-    // Model without opencode-go/ prefix should be rejected.
+    // Routed model without opencode-go/ real-model prefix should be rejected.
     let resp = adapter
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": "deepseek-v4-flash",
+            "model": "opencode_adapter/test_project/deepseek-v4-flash",
             "input": "Hello",
             "stream": false
         }))
@@ -158,6 +158,26 @@ async fn test_e2e_missing_model_prefix() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 400, "model without prefix should return 400");
+}
+
+#[tokio::test]
+async fn test_e2e_legacy_model_format_rejected() {
+    let (upstream_addr, _mock, _received) = start_mock_upstream().await;
+    let adapter = start_adapter(upstream_addr, None).await;
+
+    let resp = adapter
+        .client
+        .post(adapter_url(adapter.addr, "/v1/responses"))
+        .json(&json!({
+            "model": "opencode-go/deepseek-v4-flash",
+            "input": "Hello",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 400, "legacy model format should return 400");
 }
 
 #[tokio::test]
@@ -203,8 +223,8 @@ async fn dual_project_http_isolation() {
     let db_a = temp_dir.join(format!("dual_http_a_{}.sqlite", uuid::Uuid::new_v4()));
     let db_b = temp_dir.join(format!("dual_http_b_{}.sqlite", uuid::Uuid::new_v4()));
 
-    let pid_a = "project-a".to_string();
-    let pid_b = "project-b".to_string();
+    let pid_a = "opencode_adapter_test_a".to_string();
+    let pid_b = "opencode_adapter_test_b".to_string();
     let raw_a = "local-token-a".to_string();
     let raw_b = "local-token-b".to_string();
 
@@ -281,46 +301,46 @@ async fn dual_project_http_isolation() {
 
     let client = reqwest::Client::new();
 
-    // --- 1. A token -> /v1/models -> sees model-a (not model-b) ---
-    let signed_a = sign_local_token(&pid_a, &raw_a);
+    // --- 1. Adapter token -> /v1/models -> sees the aggregated routed model list ---
+    let signed_a = sign_adapter_token(&raw_a);
     let resp_a = client
         .get(format!("http://{addr}/v1/models"))
         .bearer_auth(&signed_a)
         .send()
         .await
         .unwrap();
-    assert_eq!(resp_a.status(), 200, "A token should succeed");
+    assert_eq!(resp_a.status(), 200, "adapter token should succeed");
     let body_a: serde_json::Value = resp_a.json().await.unwrap();
     let models_a = body_a["data"].as_array().expect("A should see model list");
     assert!(!models_a.is_empty(), "A should have at least one model");
     assert!(
-        models_a.iter().any(|m| m["id"] == "opencode-go/model-a"),
-        "A should see opencode-go/model-a",
+        models_a.iter().any(|m| m["id"] == "opencode_adapter/test_a/opencode-go/model-a"),
+        "models should include test_a model",
     );
     assert!(
-        models_a.iter().all(|m| m["id"] != "opencode-go/model-b"),
-        "A should NOT see opencode-go/model-b"
+        models_a.iter().any(|m| m["id"] == "opencode_adapter/test_b/opencode-go/model-b"),
+        "models should include test_b model"
     );
 
-    // --- 2. B token -> /v1/models -> sees model-b (not model-a) ---
-    let signed_b = sign_local_token(&pid_b, &raw_b);
+    // --- 2. Another valid adapter token sees the same aggregated routed model list ---
+    let signed_b = sign_adapter_token(&raw_b);
     let resp_b = client
         .get(format!("http://{addr}/v1/models"))
         .bearer_auth(&signed_b)
         .send()
         .await
         .unwrap();
-    assert_eq!(resp_b.status(), 200, "B token should succeed");
+    assert_eq!(resp_b.status(), 200, "adapter token should succeed");
     let body_b: serde_json::Value = resp_b.json().await.unwrap();
     let models_b = body_b["data"].as_array().expect("B should see model list");
     assert!(!models_b.is_empty(), "B should have at least one model");
     assert!(
-        models_b.iter().any(|m| m["id"] == "opencode-go/model-b"),
-        "B should see opencode-go/model-b",
+        models_b.iter().any(|m| m["id"] == "opencode_adapter/test_b/opencode-go/model-b"),
+        "models should include test_b model",
     );
     assert!(
-        models_b.iter().all(|m| m["id"] != "opencode-go/model-a"),
-        "B should NOT see opencode-go/model-a"
+        models_b.iter().any(|m| m["id"] == "opencode_adapter/test_a/opencode-go/model-a"),
+        "models should include test_a model"
     );
 
     // --- 3. Auth header tracking: each upstream received its own key ---

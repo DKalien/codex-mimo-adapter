@@ -1,4 +1,4 @@
-﻿# Codex OSS subagent template — managed by codex-opencode-adapter
+# Codex OSS subagent template — managed by codex-opencode-adapter
 # This file serves as both a runtime agent config and a canonical template.
 # The main program can overlay this content as a default via resources/templates/.
 #
@@ -7,7 +7,7 @@
 name = "oss_flash"
 description = "Low-cost DeepSeek Flash worker for simple text tasks, quick checks, and lightweight edits."
 model_provider = "opencode_go_adapter"
-model = "opencode-go/deepseek-v4-flash"
+model = "opencode_adapter/c8b0cfc9ca15/opencode-go/deepseek-v4-flash"
 model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 

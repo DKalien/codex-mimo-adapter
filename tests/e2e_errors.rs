@@ -1,7 +1,7 @@
 mod common;
 
 use common::mock_upstream::{start_mock_upstream_error, start_mock_upstream_stream_error};
-use common::{adapter_url, parse_sse_events, start_adapter};
+use common::{adapter_url, parse_sse_events, routed_model, start_adapter};
 use serde_json::{json, Value};
 
 #[tokio::test]
@@ -13,7 +13,7 @@ async fn test_e2e_upstream_http_error() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": "opencode-go/deepseek-v4-flash",
+            "model": routed_model("opencode-go/deepseek-v4-flash"),
             "input": "Hello",
             "stream": false
         }))
@@ -50,7 +50,7 @@ async fn test_e2e_upstream_stream_error() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": "opencode-go/deepseek-v4-flash",
+            "model": routed_model("opencode-go/deepseek-v4-flash"),
             "input": "Hello",
             "stream": true
         }))

@@ -3,7 +3,7 @@
 pub mod mock_upstream;
 
 use codex_opencode_adapter::config::{Config, ConfigOverrides};
-use codex_opencode_adapter::project::sign_local_token;
+use codex_opencode_adapter::project::sign_adapter_token;
 use codex_opencode_adapter::server::{self, AppState, ProjectRuntime};
 use codex_opencode_adapter::state::StateStore;
 use codex_opencode_adapter::upstream::OpenCodeGoClient;
@@ -21,15 +21,22 @@ pub struct TestAdapter {
     pub client: reqwest::Client,
 }
 
+pub const TEST_PROJECT_ID: &str = "opencode_adapter_test_project";
+pub const TEST_PROJECT_KEY: &str = "test_project";
+
+pub fn routed_model(real_model: &str) -> String {
+    format!("opencode_adapter/{TEST_PROJECT_KEY}/{real_model}")
+}
+
 pub async fn start_adapter(upstream_addr: SocketAddr, local_token: Option<String>) -> TestAdapter {
     let temp_dir = std::env::temp_dir();
     let db_name = format!("test_e2e_{}.sqlite", Uuid::new_v4());
     let db_path = temp_dir.join(db_name);
 
-    let project_id = "test-project".to_string();
+    let project_id = TEST_PROJECT_ID.to_string();
     let raw_token =
         local_token.unwrap_or_else(|| format!("codex-test-raw-{}", Uuid::new_v4().simple()));
-    let signed_token = sign_local_token(&project_id, &raw_token);
+    let signed_token = sign_adapter_token(&raw_token);
 
     let upstream_base = format!("http://{}", upstream_addr);
     let config = Config {
@@ -299,7 +306,7 @@ pub async fn start_multi_project_adapter(
 
         let raw_token = cfg.raw_token
             .unwrap_or_else(|| format!("codex-test-raw-{}", Uuid::new_v4().simple()));
-        let signed_token = sign_local_token(&cfg.project_id, &raw_token);
+        let signed_token = sign_adapter_token(&raw_token);
 
         let config = Config {
             host: "127.0.0.1".to_string(),
@@ -321,7 +328,7 @@ pub async fn start_multi_project_adapter(
         ).unwrap();
         let state = StateStore::new(&config.state_db, config.state_ttl_seconds).unwrap();
 
-        projects.insert(cfg.project_id.clone(), ProjectRuntime {
+        projects.insert(format!("opencode_adapter_{}", cfg.project_id), ProjectRuntime {
             config,
             client,
             state,

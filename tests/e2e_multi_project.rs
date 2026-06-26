@@ -1,6 +1,6 @@
 ﻿mod common;
 
-use codex_opencode_adapter::project::{ProjectRegistry, PROJECT_ENV_FILENAME, sign_local_token};
+use codex_opencode_adapter::project::{ProjectRegistry, PROJECT_ENV_FILENAME, sign_adapter_token};
 use common::mock_upstream::start_mock_upstream;
 use common::{adapter_url, start_multi_project_adapter, ProjectConfig};
 use serde_json::Value;
@@ -274,7 +274,7 @@ async fn test_admin_refresh_loads_new_project() {
     );
 
     // 4) After refresh, project B is accessible via /v1/models
-    let signed_b = sign_local_token(pid_b, raw_b);
+    let signed_b = sign_adapter_token(raw_b);
     let resp = client
         .get(adapter_url(addr, "/v1/models"))
         .bearer_auth(&signed_b)
