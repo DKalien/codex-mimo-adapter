@@ -10,7 +10,7 @@ use codex_opencode_adapter::upstream::OpenCodeGoClient;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
@@ -106,6 +106,14 @@ pub async fn start_adapter(upstream_addr: SocketAddr, local_token: Option<String
 
 pub fn adapter_url(addr: SocketAddr, path: &str) -> String {
     format!("http://{}{}", addr, path)
+}
+
+/// A global lock for tests that modify HOME/USERPROFILE environment variables.
+/// Concurrent tests within the same binary that set these env vars would
+/// otherwise overwrite each other's values, causing flaky failures.
+pub fn env_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 pub struct RealSmokeConfig {

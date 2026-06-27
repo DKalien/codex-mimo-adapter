@@ -174,7 +174,7 @@ fn build_global_codex_config(path: &Path, port: u16) -> anyhow::Result<String> {
     args.push("auth");
     args.push("print-local-token");
     auth["args"] = Item::Value(args.into());
-    auth["timeout_ms"] = value(1000);
+    auth["timeout_ms"] = value(5000);
 
     Ok(document.to_string())
 }

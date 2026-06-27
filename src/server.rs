@@ -666,11 +666,24 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
 
     let mut projects = state.projects.write().unwrap();
     let mut added = Vec::new();
-    let mut skipped = Vec::new();
+    let mut already_loaded = Vec::new();
+    let mut failed = Vec::new();
+
+    // Remove projects that no longer exist in the registry.
+    let mut removed = Vec::new();
+    let to_remove: Vec<String> = projects
+        .keys()
+        .filter(|id| !registry.projects.contains_key(id.as_str()))
+        .cloned()
+        .collect();
+    for id in &to_remove {
+        projects.remove(id);
+        removed.push(id.clone());
+    }
 
     for (project_id, entry) in &registry.projects {
         if projects.contains_key(project_id) {
-            skipped.push(project_id.clone());
+            already_loaded.push(project_id.clone());
             continue;
         }
 
@@ -678,6 +691,7 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
         let env_path = root.join(PROJECT_ENV_FILENAME);
         if !env_path.exists() {
             tracing::warn!("refresh: project {project_id} missing env file, skipping");
+            failed.push(json!({"project_id": project_id, "reason": "missing env file"}));
             continue;
         }
 
@@ -685,6 +699,7 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
             Ok(e) => e,
             Err(e) => {
                 tracing::warn!("refresh: cannot read env for {project_id}: {e}");
+                failed.push(json!({"project_id": project_id, "reason": format!("read env failed: {e}")}));
                 continue;
             }
         };
@@ -694,6 +709,7 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("refresh: bad config for {project_id}: {e}");
+                failed.push(json!({"project_id": project_id, "reason": format!("bad config: {e}")}));
                 continue;
             }
         };
@@ -705,6 +721,7 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("refresh: cannot create state for {project_id}: {e}");
+                failed.push(json!({"project_id": project_id, "reason": format!("state init failed: {e}")}));
                 continue;
             }
         };
@@ -716,6 +733,7 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("refresh: cannot create client for {project_id}: {e}");
+                failed.push(json!({"project_id": project_id, "reason": format!("client init failed: {e}")}));
                 continue;
             }
         };
@@ -730,7 +748,7 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
         added.push(project_id.clone());
     }
 
-    Json(json!({"status":"ok","added":added,"already_loaded":skipped})).into_response()
+    Json(json!({"status":"ok","added":added,"already_loaded":already_loaded,"removed":removed,"failed":failed})).into_response()
 }
 
 fn parse_routed_model(model: &str) -> Result<(String, String), &'static str> {
@@ -810,13 +828,23 @@ fn early_stream_failed_response(
     kind: &'static str,
     message: &str,
 ) -> Response {
+    let response_id = format!("resp_{}", Uuid::new_v4().simple());
+    let created_at = now_ts();
+    let shell = json!({"id":response_id,"object":"response","created_at":created_at,"status":"in_progress","error":null,"incomplete_details":null,"instructions":body.get("instructions").cloned().unwrap_or(Value::Null),"model":model_alias,"output":[],"parallel_tool_calls":body.get("parallel_tool_calls").and_then(Value::as_bool).unwrap_or(false),"previous_response_id":body.get("previous_response_id").cloned().unwrap_or(Value::Null),"store":false,"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0},"metadata":body.get("metadata").cloned().unwrap_or_else(|| json!({}))});
     let (tx, rx) =
         tokio::sync::mpsc::unbounded_channel::<Result<axum::response::sse::Event, Infallible>>();
-    let response = responses_failed_value(&body, &model_alias, kind, message);
-    let event = json!({"type":"response.failed","response":response});
+    let _ = tx.send(Ok(axum::response::sse::Event::default()
+        .event("response.created")
+        .data(json!({"type":"response.created","response":shell.clone()}).to_string())));
+    let _ = tx.send(Ok(axum::response::sse::Event::default()
+        .event("response.in_progress")
+        .data(json!({"type":"response.in_progress","response":shell.clone()}).to_string())));
+    let mut failed_response = shell;
+    failed_response["status"] = json!("failed");
+    failed_response["error"] = json!({"type":kind,"code":kind,"message":message.chars().take(1000).collect::<String>()});
     let _ = tx.send(Ok(axum::response::sse::Event::default()
         .event("response.failed")
-        .data(event.to_string())));
+        .data(json!({"type":"response.failed","response":failed_response}).to_string())));
     let _ = tx.send(Ok(axum::response::sse::Event::default().data("[DONE]")));
     let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
     Sse::new(stream).into_response()

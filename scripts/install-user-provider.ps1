@@ -22,7 +22,7 @@ stream_idle_timeout_ms = 120000
 [model_providers.opencode_go_adapter.auth]
 command = "codex-opencode-adapter"
 args = ["auth", "print-local-token"]
-timeout_ms = 1000
+timeout_ms = 5000
 "@
     exit 0
 }

@@ -126,32 +126,69 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
 }
 
 async fn run_check() -> anyhow::Result<()> {
-    let config = load_project_config(RunArgs::default())?;
-    let raw_token = config
-        .local_token
-        .as_deref()
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("CODEX_OPENCODE_LOCAL_TOKEN is missing"))?;
-    let signed_token = sign_adapter_token(raw_token);
-
-    let base = format!("http://{}:{}", config.host, config.port);
     let client = reqwest::Client::new();
+
+    // Phase 1: Resolve project context for host/port/token.
+    // If no project context is available, fall back to defaults for a basic health check.
+    let (base, config) = match load_project_config(RunArgs::default()) {
+        Ok(config) => {
+            let base = format!("http://{}:{}", config.host, config.port);
+            (base, Some(config))
+        }
+        Err(error) => {
+            eprintln!("Warning: could not load project config: {error}");
+            let base = format!("http://{}:{}", DEFAULT_HOST, DEFAULT_PORT);
+            (base, None)
+        }
+    };
+
+    // Phase 2: Health check works without project context.
     let health = client
         .get(format!("{base}/health"))
         .send()
         .await
         .map_err(|_| {
-            anyhow::anyhow!("Adapter is not running. Start it with 'codex-opencode-adapter run' or 'codex-opencode-adapter start'.")
+            if config.is_some() {
+                anyhow::anyhow!(
+                    "Adapter is not running at {base}. Start it with 'codex-opencode-adapter run' or 'codex-opencode-adapter start'."
+                )
+            } else {
+                anyhow::anyhow!(
+                    "Could not reach adapter at {base}.\n\
+                     Either start the adapter, or run from a project directory / set CODEX_OPENCODE_PROJECT_ID\n\
+                     to check the correct host/port from your project configuration."
+                )
+            }
         })?;
-    anyhow::ensure!(health.status().is_success(), "health check failed");
+    anyhow::ensure!(health.status().is_success(), "health check failed at {base}");
+    println!("\u{2713} Adapter health check passed at {base}");
 
-    let models = client
-        .get(format!("{base}/v1/models"))
-        .bearer_auth(&signed_token)
-        .send()
-        .await?;
-    anyhow::ensure!(models.status().is_success(), "/v1/models check failed");
-    println!("Adapter check passed.");
+    // Phase 3: Models check requires project context.
+    match config {
+        Some(config) => {
+            let raw_token = config
+                .local_token
+                .as_deref()
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("CODEX_OPENCODE_LOCAL_TOKEN is missing in project config"))?;
+            let signed_token = sign_adapter_token(raw_token);
+
+            let models = client
+                .get(format!("{base}/v1/models"))
+                .bearer_auth(&signed_token)
+                .send()
+                .await?;
+            anyhow::ensure!(models.status().is_success(), "/v1/models check failed");
+            println!("\u{2713} Models endpoint verified");
+            println!("Adapter check passed.");
+        }
+        None => {
+            println!("\u{2713} Adapter is reachable.");
+            println!("  For full verification including /v1/models, run from a project directory");
+            println!("  or set CODEX_OPENCODE_PROJECT_ID to your project ID.");
+        }
+    }
+
     Ok(())
 }
 

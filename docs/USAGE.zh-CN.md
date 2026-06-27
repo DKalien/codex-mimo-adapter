@@ -92,7 +92,7 @@ codex-opencode-adapter init --api-key "<你的 OpenCode Go API Key>"
 [model_providers.opencode_go_adapter.auth]
 command = "codex-opencode-adapter"
 args = ["auth", "print-local-token"]
-timeout_ms = 1000
+timeout_ms = 5000
 ```
 
 [config.toml.example](../config.toml.example) 是合并模板，不应整份复制成项目

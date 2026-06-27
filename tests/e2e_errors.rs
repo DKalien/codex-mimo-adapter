@@ -44,7 +44,6 @@ async fn test_e2e_upstream_http_error() {
         "error message should contain upstream message"
     );
 }
-
 #[tokio::test]
 async fn test_e2e_upstream_stream_error() {
     let (upstream_addr, _mock, _received) = start_mock_upstream_stream_error().await;
@@ -131,4 +130,76 @@ async fn test_e2e_stream_rate_limit_error() {
         failed_payload["error"]["message"].as_str().unwrap(),
         "adapter concurrency limit reached"
     );
+}
+#[tokio::test]
+async fn test_e2e_stream_early_history_error_event_order() {
+    let (upstream_addr, _mock, _received) = start_mock_upstream().await;
+    let adapter = start_adapter(upstream_addr, None).await;
+
+    // Trigger: previous_response_id not found in store + tool call outputs exist
+    let resp = adapter
+        .client
+        .post(adapter_url(adapter.addr, "/v1/responses"))
+        .json(&json!({
+            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "input": [{"type":"function_call_output","call_id":"call_missing","output":"ok"}],
+            "stream": true,
+            "previous_response_id": "resp_never_stored"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "stream returns 200 even on early failure");
+    let body_text = resp.text().await.unwrap();
+
+    // Parse SSE events manually to check ordering including [DONE].
+    let mut event_names: Vec<String> = Vec::new();
+    for block in body_text.split("\n\n") {
+        let mut event = String::new();
+        let mut data = String::new();
+        for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("event:") {
+                event = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("data:") {
+                data = rest.trim().to_string();
+            }
+        }
+        if !data.is_empty() {
+            if data == "[DONE]" {
+                event_names.push("[DONE]".to_string());
+            } else if !event.is_empty() {
+                event_names.push(event);
+            }
+        }
+    }
+
+    assert_eq!(
+        event_names,
+        vec!["response.created".to_string(), "response.in_progress".to_string(), "response.failed".to_string(), "[DONE]".to_string()],
+        "early stream failure must emit created -> in_progress -> failed -> [DONE]"
+    );
+
+    // Verify response.failed carries expected error fields.
+    for block in body_text.split("\n\n") {
+        let mut event = String::new();
+        let mut data = String::new();
+        for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("event:") {
+                event = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("data:") {
+                data = rest.trim().to_string();
+            }
+        }
+        if event == "response.failed" {
+            let payload: serde_json::Value = serde_json::from_str(&data).unwrap();
+            let r = &payload["response"];
+            assert_eq!(r["status"], "failed");
+            assert_eq!(r["error"]["type"], "invalid_tool_history");
+            assert_eq!(r["error"]["code"], "invalid_tool_history");
+            assert!(r["error"]["message"].as_str().unwrap().contains("resp_never_stored"));
+            assert!(r["id"].as_str().unwrap().starts_with("resp_"));
+            break;
+        }
+    }
 }

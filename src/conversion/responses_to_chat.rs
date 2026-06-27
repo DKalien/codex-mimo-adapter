@@ -319,12 +319,8 @@ fn extract_request_with_context(
                     "tool output item received in Responses input"
                 );
                 flush_pending(&mut messages, &mut pending_calls);
-                let content = if kind == "function_call_output" {
-                    let empty = Value::String(String::new());
-                    as_text(obj.get("output").unwrap_or(&empty))
-                } else {
-                    compact_json(&Value::Object(obj.clone()))
-                };
+                let empty = Value::String(String::new());
+                let content = as_text(obj.get("output").unwrap_or(&empty));
                 tool_outputs.push(json!({
                     "role":"tool",
                     "tool_call_id":call_id,

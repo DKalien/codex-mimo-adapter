@@ -179,6 +179,7 @@ async fn single_adapter_serves_multiple_projects() {
 // ---------------------------------------------------------------------------
 #[tokio::test]
 async fn test_admin_refresh_loads_new_project() {
+    let _env_guard = common::env_lock().lock().await;
     let orig_user = std::env::var("USERPROFILE").ok();
     let orig_home = std::env::var("HOME").ok();
 
@@ -308,5 +309,232 @@ async fn test_admin_refresh_loads_new_project() {
         None => std::env::remove_var("HOME"),
     }
 
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+
+// ---------------------------------------------------------------------------
+// Admin refresh: removed projects and failure reporting.
+// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn test_admin_refresh_removes_deleted_project() {
+    let _env_guard = common::env_lock().lock().await;
+    let orig_user = std::env::var("USERPROFILE").ok();
+    let orig_home = std::env::var("HOME").ok();
+
+    let home = std::env::temp_dir().join(format!("test_admin_refresh_rm_{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("USERPROFILE", &home);
+    std::env::set_var("HOME", &home);
+
+    let reg_dir = home.join(".codex-opencode-adapter");
+    std::fs::create_dir_all(&reg_dir).unwrap();
+
+    let (upstream_a, _mock_a, _recv_a) = start_mock_upstream().await;
+    let (upstream_b, _mock_b, _recv_b) = start_mock_upstream().await;
+
+    // --- Project A ---
+    let proj_a_root = home.join("proj_a");
+    std::fs::create_dir_all(&proj_a_root).unwrap();
+    let pid_a = "project-a";
+    let raw_a = "raw-token-a";
+
+    std::fs::write(
+        proj_a_root.join(PROJECT_ENV_FILENAME),
+        format!(
+            "OPENCODE_GO_API_KEY=key-a\nCODEX_OPENCODE_LOCAL_TOKEN={raw_a}\n             CODEX_OPENCODE_PROJECT_ID={pid_a}\n             OPENCODE_GO_BASE_URL=http://127.0.0.1:{port}\n             CODEX_OPENCODE_STATE_DB=.codex-opencode/state.sqlite\n             CODEX_OPENCODE_HOST=127.0.0.1\nCODEX_OPENCODE_PORT=4010\n",
+            port = upstream_a.port()
+        ),
+    ).unwrap();
+    std::fs::create_dir_all(proj_a_root.join(".codex-opencode")).unwrap();
+
+    // --- Project B ---
+    let proj_b_root = home.join("proj_b");
+    std::fs::create_dir_all(&proj_b_root).unwrap();
+    let pid_b = "project-b";
+    let raw_b = "raw-token-b";
+
+    std::fs::write(
+        proj_b_root.join(PROJECT_ENV_FILENAME),
+        format!(
+            "OPENCODE_GO_API_KEY=key-b\nCODEX_OPENCODE_LOCAL_TOKEN={raw_b}\n             CODEX_OPENCODE_PROJECT_ID={pid_b}\n             OPENCODE_GO_BASE_URL=http://127.0.0.1:{port}\n             CODEX_OPENCODE_STATE_DB=.codex-opencode/state.sqlite\n             CODEX_OPENCODE_HOST=127.0.0.1\nCODEX_OPENCODE_PORT=4010\n",
+            port = upstream_b.port()
+        ),
+    ).unwrap();
+    std::fs::create_dir_all(proj_b_root.join(".codex-opencode")).unwrap();
+
+    // --- Registry with both projects ---
+    let mut registry = ProjectRegistry::load(&reg_dir);
+    registry.upsert_project(pid_a, &proj_a_root);
+    registry.upsert_project(pid_b, &proj_b_root);
+    registry.save(&reg_dir).unwrap();
+
+    // --- Start adapter with only project A ---
+    let configs = vec![ProjectConfig {
+        project_id: pid_a.to_string(),
+        upstream_addr: upstream_a,
+        upstream_key: "key-a".to_string(),
+        raw_token: Some(raw_a.to_string()),
+    }];
+
+    let (addr, tokens) = start_multi_project_adapter(configs, 10).await;
+    let signed_a = tokens.get(pid_a).expect("project-a token should exist");
+    let client = reqwest::Client::new();
+
+    // First refresh: load project B
+    let resp = client
+        .post(adapter_url(addr, "/admin/refresh"))
+        .bearer_auth(signed_a)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "first refresh should succeed");
+    let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+    // startup project ("opencode_adapter_{pid_a}") is removed by refresh,
+    // then "project-a" and "project-b" are both added from registry
+    assert_eq!(body["added"].as_array().map(|a| a.len()).unwrap_or(0), 2, "should have added both projects");
+    assert!(body["added"].as_array().unwrap().iter().any(|v| v.as_str() == Some(pid_b)), "project-b should be added");
+
+    // --- Remove project B from registry ---
+    let mut registry = ProjectRegistry::load(&reg_dir);
+    registry.projects.remove(pid_b);
+    registry.save(&reg_dir).unwrap();
+
+    // Second refresh: project B should be removed
+    let resp = client
+        .post(adapter_url(addr, "/admin/refresh"))
+        .bearer_auth(signed_a)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "second refresh should succeed");
+    let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+
+    let removed = body["removed"].as_array().expect("response should have 'removed' array");
+    assert!(
+        removed.iter().any(|v| v.as_str() == Some(pid_b)),
+        "project-b should be in removed list, got: {:?}",
+        removed
+    );
+
+    // No new adds after second refresh
+    assert!(
+        body["added"].as_array().map(|a| a.is_empty()).unwrap_or(false),
+        "should have no new additions after removing project-b, got: {:?}",
+        body["added"]
+    );
+
+    // Project A should still be present (already_loaded)
+    let already = body["already_loaded"].as_array().expect("response should have 'already_loaded' array");
+    assert!(
+        already.iter().any(|v| v.as_str() == Some(pid_a)),
+        "project-a should be in already_loaded, got: {:?}",
+        already
+    );
+
+    // Restore env vars
+    match orig_user {
+        Some(v) => std::env::set_var("USERPROFILE", v),
+        None => std::env::remove_var("USERPROFILE"),
+    }
+    match orig_home {
+        Some(v) => std::env::set_var("HOME", v),
+        None => std::env::remove_var("HOME"),
+    }
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[tokio::test]
+async fn test_admin_refresh_reports_failure_reason() {
+    let _env_guard = common::env_lock().lock().await;
+    let orig_user = std::env::var("USERPROFILE").ok();
+    let orig_home = std::env::var("HOME").ok();
+
+    let home = std::env::temp_dir().join(format!("test_admin_refresh_fail_{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("USERPROFILE", &home);
+    std::env::set_var("HOME", &home);
+
+    let reg_dir = home.join(".codex-opencode-adapter");
+    std::fs::create_dir_all(&reg_dir).unwrap();
+
+    let (upstream_a, _mock_a, _recv_a) = start_mock_upstream().await;
+
+    // --- Project A (valid) ---
+    let proj_a_root = home.join("proj_a");
+    std::fs::create_dir_all(&proj_a_root).unwrap();
+    let pid_a = "project-a";
+
+    std::fs::write(
+        proj_a_root.join(PROJECT_ENV_FILENAME),
+        format!(
+            "OPENCODE_GO_API_KEY=key-a\nCODEX_OPENCODE_LOCAL_TOKEN=raw-token-a\n             CODEX_OPENCODE_PROJECT_ID={pid_a}\n             OPENCODE_GO_BASE_URL=http://127.0.0.1:{port}\n             CODEX_OPENCODE_STATE_DB=.codex-opencode/state.sqlite\n             CODEX_OPENCODE_HOST=127.0.0.1\nCODEX_OPENCODE_PORT=4010\n",
+            port = upstream_a.port()
+        ),
+    ).unwrap();
+    std::fs::create_dir_all(proj_a_root.join(".codex-opencode")).unwrap();
+
+    // --- Registry with A (valid) and C (no env file / non-existent root) ---
+    let mut registry = ProjectRegistry::load(&reg_dir);
+    registry.upsert_project(pid_a, &proj_a_root);
+    // Project C: registry entry pointing to a non-existent root -> missing env file
+    registry.upsert_project("project-c", &home.join("nonexistent_c"));
+    registry.save(&reg_dir).unwrap();
+
+    // --- Start adapter with only project A ---
+    let configs = vec![ProjectConfig {
+        project_id: pid_a.to_string(),
+        upstream_addr: upstream_a,
+        upstream_key: "key-a".to_string(),
+        raw_token: Some("raw-token-a".to_string()),
+    }];
+
+    let (addr, tokens) = start_multi_project_adapter(configs, 10).await;
+    let signed_a = tokens.get(pid_a).expect("project-a token should exist");
+    let client = reqwest::Client::new();
+
+    // Refresh: project C should fail with a reason
+    let resp = client
+        .post(adapter_url(addr, "/admin/refresh"))
+        .bearer_auth(signed_a)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "refresh should succeed");
+
+    let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+
+    // startup project ("opencode_adapter_{pid_a}") is removed by refresh,
+    // then "project-a" is added from registry
+    let _added = body["added"].as_array().unwrap();
+    let _already = body["already_loaded"].as_array().unwrap();
+    // C should be in the failed list
+    let failed = body["failed"].as_array().expect("response should have 'failed' array");
+    assert_eq!(failed.len(), 1, "should have one failed entry, got {failed:?}");
+
+    let entry = &failed[0];
+    assert_eq!(
+        entry["project_id"].as_str(),
+        Some("project-c"),
+        "failed entry should be project-c, got: {:?}",
+        entry
+    );
+
+    let reason = entry["reason"].as_str().unwrap_or("");
+    assert!(
+        !reason.is_empty(),
+        "failed entry should have a non-empty reason, got: {:?}",
+        entry
+    );
+
+    // Restore env vars
+    match orig_user {
+        Some(v) => std::env::set_var("USERPROFILE", v),
+        None => std::env::remove_var("USERPROFILE"),
+    }
+    match orig_home {
+        Some(v) => std::env::set_var("HOME", v),
+        None => std::env::remove_var("HOME"),
+    }
     let _ = std::fs::remove_dir_all(&home);
 }

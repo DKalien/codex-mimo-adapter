@@ -95,7 +95,7 @@ wire_api = "responses"
 [model_providers.opencode_go_adapter.auth]
 command = "cmd.exe"
 args = ["/d", "/s", "/c", "echo old"]
-timeout_ms = 1000
+timeout_ms = 5000
 "#;
     fs::write(&config_path, original).unwrap();
 
@@ -244,6 +244,37 @@ fn auth_rejects_recovered_project_when_registry_mismatches_env() {
     assert!(
         direct_token.starts_with("codex-opencode-"),
         "token should be a valid adapter token"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test: check without project context falls through to health check
+#[test]
+fn check_without_project_context_shows_connectivity_error() {
+    let sandbox = TestSandbox::new("check-no-context");
+    // No init means no projects at all and no env file.
+    let external_dir = sandbox.root().join("external");
+    fs::create_dir_all(&external_dir).unwrap();
+
+    let output = sandbox.run_in(&external_dir, ["check"]);
+    let stderr_text = stderr(&output);
+    let stdout_text = stdout(&output);
+
+    // Must never mention "Project is not initialized"; that was the original bug.
+    assert!(
+        !stderr_text.contains("Project is not initialized"),
+        "must not mention project init: {stderr_text}"
+    );
+    // The warning prints the original config error, so "No OpenCode" is
+    // expected in stderr.  It must NOT appear in stdout though.
+    assert!(
+        !stdout_text.contains("No OpenCode"),
+        "must not mention 'no projects' in stdout: {stdout_text}"
+    );
+    // Verify the warning is present so the user knows why.
+    assert!(
+        stderr_text.contains("Warning: could not load project config"),
+        "stderr should contain config resolution warning: {stderr_text}"
     );
 }
 
