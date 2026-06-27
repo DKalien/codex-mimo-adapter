@@ -1,4 +1,4 @@
-﻿#![allow(dead_code)]
+#![allow(dead_code)]
 
 pub mod mock_upstream;
 
@@ -56,7 +56,8 @@ pub async fn start_adapter(upstream_addr: SocketAddr, local_token: Option<String
         &config.upstream_base,
         &config.upstream_key,
         config.timeout_seconds,
-    ).unwrap();
+    )
+    .unwrap();
     let state = StateStore::new(&config.state_db, config.state_ttl_seconds).unwrap();
     let capacity = Arc::new(Semaphore::new(10));
 
@@ -69,7 +70,11 @@ pub async fn start_adapter(upstream_addr: SocketAddr, local_token: Option<String
             state,
         },
     );
-    let app_state = AppState { projects: Arc::new(RwLock::new(projects)), capacity, config_overrides: ConfigOverrides::default() };
+    let app_state = AppState {
+        projects: Arc::new(RwLock::new(projects)),
+        capacity,
+        config_overrides: ConfigOverrides::default(),
+    };
     let app = server::router(app_state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -170,7 +175,11 @@ pub async fn start_real_adapter(config: &RealSmokeConfig) -> SocketAddr {
             state,
         },
     );
-    let app_state = AppState { projects: Arc::new(RwLock::new(projects)), capacity, config_overrides: ConfigOverrides::default() };
+    let app_state = AppState {
+        projects: Arc::new(RwLock::new(projects)),
+        capacity,
+        config_overrides: ConfigOverrides::default(),
+    };
     let app = server::router(app_state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -304,7 +313,8 @@ pub async fn start_multi_project_adapter(
         let db_name = format!("test_e2e_mp_{}.sqlite", Uuid::new_v4());
         let db_path = temp_dir.join(db_name);
 
-        let raw_token = cfg.raw_token
+        let raw_token = cfg
+            .raw_token
             .unwrap_or_else(|| format!("codex-test-raw-{}", Uuid::new_v4().simple()));
         let signed_token = sign_adapter_token(&raw_token);
 
@@ -325,19 +335,27 @@ pub async fn start_multi_project_adapter(
             &config.upstream_base,
             &config.upstream_key,
             config.timeout_seconds,
-        ).unwrap();
+        )
+        .unwrap();
         let state = StateStore::new(&config.state_db, config.state_ttl_seconds).unwrap();
 
-        projects.insert(format!("opencode_adapter_{}", cfg.project_id), ProjectRuntime {
-            config,
-            client,
-            state,
-        });
+        projects.insert(
+            format!("opencode_adapter_{}", cfg.project_id),
+            ProjectRuntime {
+                config,
+                client,
+                state,
+            },
+        );
         tokens.insert(cfg.project_id, signed_token);
     }
 
     let capacity = Arc::new(Semaphore::new(max_concurrency));
-    let app_state = AppState { projects: Arc::new(RwLock::new(projects)), capacity, config_overrides: ConfigOverrides::default() };
+    let app_state = AppState {
+        projects: Arc::new(RwLock::new(projects)),
+        capacity,
+        config_overrides: ConfigOverrides::default(),
+    };
     let app = server::router(app_state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

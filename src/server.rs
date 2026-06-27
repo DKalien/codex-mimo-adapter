@@ -1,4 +1,4 @@
-﻿use axum::extract::State;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post};
@@ -22,8 +22,8 @@ use crate::media_guard::{
     unsupported_multimodal_error_message,
 };
 use crate::project::{
-    current_environment, project_id_from_key, project_key_from_id, read_project_env,
-    registry_dir_path, validate_adapter_token, ProjectRegistry, PROJECT_ENV_FILENAME,
+    project_id_from_key, project_key_from_id, read_project_env, registry_dir_path,
+    validate_adapter_token, ProjectRegistry, PROJECT_ENV_FILENAME,
 };
 use crate::state::{now_ts, StateStore};
 use crate::upstream::{
@@ -144,7 +144,7 @@ async fn responses(State(state): State<AppState>, headers: HeaderMap, body: Stri
         if let Err(response) = authorize_adapter(&projects, &headers) {
             return *response;
         }
-        match projects.get(&project_id) {
+        match project_runtime(&projects, &project_id) {
             Some(r) => r.clone(),
             None => {
                 return error_response(
@@ -222,7 +222,7 @@ async fn complete_response(
             &message,
         );
     }
-    let permit = match capacity.clone().try_acquire_owned() {
+    let _permit = match capacity.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
             return error_response(
@@ -233,7 +233,7 @@ async fn complete_response(
         }
     };
     let upstream = runtime.client.chat(payload).await;
-    drop(permit);
+    drop(_permit);
     let upstream = match upstream {
         Ok(value) => value,
         Err(error) => {
@@ -346,10 +346,18 @@ async fn stream_response(
         );
         if let Err(error) = assembler.start() {
             tracing::error!(error = %error, "failed to emit initial stream lifecycle events");
+
+            let response =
+                responses_failed_value(&body, &model_alias, "internal_error", &error.to_string());
+            let event = json!({"type":"response.failed","response":response});
+            let _ = tx.send(Ok(axum::response::sse::Event::default()
+                .event("response.failed")
+                .data(event.to_string())));
             let _ = tx.send(Ok(axum::response::sse::Event::default().data("[DONE]")));
+
             return;
         }
-        let permit = match capacity.clone().try_acquire_owned() {
+        let _permit = match capacity.clone().try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => {
                 if let Err(error) =
@@ -362,7 +370,7 @@ async fn stream_response(
             }
         };
         let upstream = runtime_for_task.client.chat_stream(payload).await;
-        drop(permit);
+
         match upstream {
             Ok(mut stream) => {
                 let mut buffer = String::new();
@@ -576,10 +584,7 @@ fn previous_response(
     Ok(Some(previous))
 }
 
-fn authorize_adapter(
-    projects: &HashMap<String, ProjectRuntime>,
-    headers: &HeaderMap,
-) -> Result<(), Box<Response>> {
+fn adapter_bearer_token(headers: &HeaderMap) -> Result<&str, Box<Response>> {
     let auth_header = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -590,19 +595,48 @@ fn authorize_adapter(
                 "Missing Authorization header. Provide a valid Bearer token.",
             ))
         })?;
-    let raw_token = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
+    auth_header.strip_prefix("Bearer ").ok_or_else(|| {
         Box::new(error_response(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "Invalid Authorization format. Expected 'Bearer <token>'.",
         ))
-    })?;
-    for runtime in projects.values() {
-        if let Some(ref local_token) = runtime.config.local_token {
-            if !local_token.is_empty() && validate_adapter_token(raw_token, local_token) {
-                return Ok(());
-            }
-        }
+    })
+}
+
+fn project_runtime<'a>(
+    projects: &'a HashMap<String, ProjectRuntime>,
+    project_id: &str,
+) -> Option<&'a ProjectRuntime> {
+    projects
+        .get(project_id)
+        .or_else(|| projects.get(project_key_from_id(project_id)))
+        .or_else(|| {
+            let canonical_id = project_id_from_key(project_id);
+            projects.get(&canonical_id)
+        })
+}
+
+fn runtime_accepts_token(runtime: &ProjectRuntime, raw_token: &str) -> bool {
+    runtime
+        .config
+        .local_token
+        .as_ref()
+        .is_some_and(|local_token| {
+            !local_token.is_empty() && validate_adapter_token(raw_token, local_token)
+        })
+}
+
+fn authorize_adapter(
+    projects: &HashMap<String, ProjectRuntime>,
+    headers: &HeaderMap,
+) -> Result<(), Box<Response>> {
+    let raw_token = adapter_bearer_token(headers)?;
+    if projects
+        .values()
+        .any(|runtime| runtime_accepts_token(runtime, raw_token))
+    {
+        return Ok(());
     }
     Err(Box::new(error_response(
         StatusCode::UNAUTHORIZED,
@@ -611,10 +645,7 @@ fn authorize_adapter(
     )))
 }
 
-async fn admin_refresh(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Response {
+async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Response {
     // Auth: accept any valid adapter bearer token.
     let auth_ok = {
         let projects = state.projects.read().unwrap();
@@ -657,8 +688,9 @@ async fn admin_refresh(
                 continue;
             }
         };
-        let env = current_environment();
-        let config = match Config::from_sources(&project_env, &env, state.config_overrides.clone()) {
+        let env = HashMap::new();
+        let config = match Config::from_sources(&project_env, &env, state.config_overrides.clone())
+        {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("refresh: bad config for {project_id}: {e}");
@@ -666,7 +698,10 @@ async fn admin_refresh(
             }
         };
         let state_db_path = root.join(&config.state_db);
-        let store = match StateStore::new(state_db_path.display().to_string(), config.state_ttl_seconds) {
+        let store = match StateStore::new(
+            state_db_path.display().to_string(),
+            config.state_ttl_seconds,
+        ) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("refresh: cannot create state for {project_id}: {e}");
@@ -684,13 +719,19 @@ async fn admin_refresh(
                 continue;
             }
         };
-        projects.insert(project_id.clone(), ProjectRuntime { config, client, state: store });
+        projects.insert(
+            project_id.clone(),
+            ProjectRuntime {
+                config,
+                client,
+                state: store,
+            },
+        );
         added.push(project_id.clone());
     }
 
     Json(json!({"status":"ok","added":added,"already_loaded":skipped})).into_response()
 }
-
 
 fn parse_routed_model(model: &str) -> Result<(String, String), &'static str> {
     let Some(rest) = model.strip_prefix("opencode_adapter/") else {
@@ -863,6 +904,3 @@ fn upstream_error(error: UpstreamError) -> Response {
         }
     }
 }
-
-
-

@@ -671,7 +671,8 @@ fn convert_tool_choice(choice: Option<&Value>, context: &ToolContext) -> Option<
         );
     }
     if kind == "tool_search" {
-        return Some(json!({"type":"function","function":{"name":"tool_search"}}));
+        let chat_name = context.chat_name_for_response_function("tool_search", None);
+        return Some(json!({"type":"function","function":{"name":chat_name}}));
     }
     Some(choice.clone())
 }

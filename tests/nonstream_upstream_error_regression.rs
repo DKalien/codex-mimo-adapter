@@ -1,4 +1,4 @@
-﻿use axum::extract::State as AxumState;
+use axum::extract::State as AxumState;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::post;
@@ -41,7 +41,10 @@ async fn nonstream_upstream_http_error_returns_responses_failed_body() {
 
     assert_eq!(body["object"], "response");
     assert_eq!(body["status"], "failed");
-    assert_eq!(body["model"], "opencode_adapter/test_nons/opencode-go/deepseek-v4-flash");
+    assert_eq!(
+        body["model"],
+        "opencode_adapter/test_nons/opencode-go/deepseek-v4-flash"
+    );
     assert_eq!(body["metadata"]["case"], "nonstream-upstream-error");
     assert!(body["output"].as_array().unwrap().is_empty());
     assert_eq!(body["usage"]["input_tokens"], 0);

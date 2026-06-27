@@ -1,4 +1,4 @@
-﻿use axum::http::{header::AUTHORIZATION, HeaderMap, StatusCode};
+use axum::http::{header::AUTHORIZATION, HeaderMap, StatusCode};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
@@ -241,7 +241,10 @@ fn auth_rejects_recovered_project_when_registry_mismatches_env() {
     let direct = sandbox.run(["auth", "print-local-token"]);
     assert_success(&direct);
     let direct_token = stdout(&direct).trim().to_string();
-    assert!(direct_token.starts_with("codex-opencode-"), "token should be a valid adapter token");
+    assert!(
+        direct_token.starts_with("codex-opencode-"),
+        "token should be a valid adapter token"
+    );
 }
 
 #[test]
@@ -271,11 +274,14 @@ fn check_uses_project_env_and_succeeds() {
 
     // Register project in registry, then override env with mock upstream
     assert_success(&sandbox.run(["init", "--api-key", "test-api-key"]));
-    let init_env = fs::read_to_string(sandbox.project().join(".codex-opencode-adapter.env")).unwrap();
-    let proj_id = init_env.lines()
+    let init_env =
+        fs::read_to_string(sandbox.project().join(".codex-opencode-adapter.env")).unwrap();
+    let proj_id = init_env
+        .lines()
         .find_map(|l| l.strip_prefix("CODEX_OPENCODE_PROJECT_ID="))
         .unwrap();
-    let init_token = init_env.lines()
+    let init_token = init_env
+        .lines()
         .find_map(|l| l.strip_prefix("CODEX_OPENCODE_LOCAL_TOKEN="))
         .unwrap();
 
@@ -356,7 +362,7 @@ fn dual_project_isolation() {
         "config must contain opencode_go_adapter"
     );
     assert!(
-        !config.contains("opencode_adapter_"),
+        !config.contains("model_providers.opencode_adapter_"),
         "config should not contain project-specific provider names"
     );
 
@@ -377,9 +383,8 @@ fn dual_project_isolation() {
     );
 }
 
-
 // ---------------------------------------------------------------------------
-// Req 2: external auth multi-project must fail
+// Req 2: external auth multi-project falls back to an adapter-level token
 #[test]
 fn dual_project_external_auth_must_not_silently_succeed() {
     let sandbox = TestSandbox::new("dual-ext-auth-req2");
@@ -398,13 +403,14 @@ fn dual_project_external_auth_must_not_silently_succeed() {
     );
     assert_success(&output);
     let token = stdout(&output).trim().to_string();
-    assert!(token.starts_with("codex-opencode-"), "token should be a valid adapter token");
+    assert!(
+        token.starts_with("codex-opencode-"),
+        "token should be a valid adapter token"
+    );
 }
 
 #[test]
-fn dual_project_external_auth_can_use_recent_explicit_project_activity() {
-    // With adapter-level auth, external auth returns whichever registered
-    // project token it finds. There is no active-project selection.
+fn dual_project_external_auth_can_use_registered_adapter_token() {
     let sandbox = TestSandbox::new("dual-ext-auth-active-ttl");
     let proj_a = sandbox.root().join("proj_a");
     fs::create_dir_all(&proj_a).unwrap();
@@ -422,7 +428,10 @@ fn dual_project_external_auth_can_use_recent_explicit_project_activity() {
     );
     assert_success(&output);
     let token = stdout(&output).trim().to_string();
-    assert!(token.starts_with("codex-opencode-"), "token should be a valid adapter token");
+    assert!(
+        token.starts_with("codex-opencode-"),
+        "token should be a valid adapter token"
+    );
 }
 
 // ---------------------------------------------------------------------------

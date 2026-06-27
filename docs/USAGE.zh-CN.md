@@ -1,4 +1,4 @@
-﻿# Codex OpenCode Adapter 使用说明
+# Codex OpenCode Adapter 使用说明
 
 这份说明用于安装、启动和排查薄 Bridge，目标是避免用真实模型反复试错。
 
@@ -13,7 +13,7 @@
 1. 全局安装（仅首次，或更新后重新安装）：
 
 ```powershell
-cargo install codex-opencode-adapter
+cargo install --path .
 ```
 
 2. 初始化配置（安装用户级 Provider + 写入项目配置 + 写入默认 OSS agent 模板）：
@@ -50,7 +50,7 @@ cargo run -- start
 
 `check` 主要用于排障，`auth print-local-token` 主要给 provider auth helper 调用，不是日常手工入口。
 
-> `auth print-local-token` 返回 adapter 级 token，不再负责选择项目。项目选择只来自请求里的 `model = "opencode_adapter/<project_key>/<real_model>"`；裸 `opencode-go/<model-id>` 已不再支持。
+> `auth print-local-token` 输出 adapter 本地 token，用于证明调用方可以访问本机 adapter；项目选择不由 token 决定，而由请求中的 `model = "opencode_adapter/<project_key>/<real_model>"` 决定。无项目上下文时可从 registry 中任一已注册项目读取本地 token，因为 token 是 adapter 级鉴权而不是项目路由。裸 `opencode-go/<model-id>` 已不再支持。
 
 ## 1. 配置分层
 
@@ -148,8 +148,10 @@ Invoke-RestMethod http://127.0.0.1:4010/health
 期望 `status` 为 `ok`。
 
 ```powershell
-cargo test
+Invoke-RestMethod http://127.0.0.1:4010/v1/models -Headers @{Authorization = "Bearer $(codex-opencode-adapter auth print-local-token)"}
 ```
+
+期望返回 `object` 为 `list`，`data` 为可用模型列表。
 
 以上任一步失败，都不要启动子代理。
 

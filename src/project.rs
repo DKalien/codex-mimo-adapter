@@ -1,4 +1,4 @@
-﻿use anyhow::{anyhow, Context};
+use anyhow::{anyhow, Context};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -185,8 +185,6 @@ impl ProjectPaths {
         }
         Self::from_root(start.to_path_buf())
     }
-
-
 }
 
 fn codex_thread_ids() -> Vec<String> {
@@ -317,8 +315,7 @@ pub fn resolve_project() -> anyhow::Result<ProjectPaths> {
     }
 
     // Priority 2: cwd / ancestor walk
-    let cwd = std::env::current_dir()
-        .context("failed to resolve current working directory")?;
+    let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
     let discovered = ProjectPaths::discover_from(&cwd);
     if discovered.env_file.exists() {
         validate_recovered_project(&discovered)
@@ -335,8 +332,9 @@ pub fn resolve_project() -> anyhow::Result<ProjectPaths> {
             {
                 let thread_paths = ProjectPaths::discover_from(&thread_cwd);
                 if thread_paths.env_file.exists() {
-                    validate_recovered_project(&thread_paths)
-                        .context("found project via Codex thread context but registry check failed")?;
+                    validate_recovered_project(&thread_paths).context(
+                        "found project via Codex thread context but registry check failed",
+                    )?;
                     return Ok(thread_paths);
                 }
             }
@@ -345,11 +343,10 @@ pub fn resolve_project() -> anyhow::Result<ProjectPaths> {
 
     // Priority 4: Constrained fallback -- single registered project only
     if registry.projects.is_empty() {
-        return Err(anyhow!(
-            concat!(
-            "No OpenCode adapter projects found.\n", " Run 'codex-opencode-adapter init' from your project root to create one."
-        )
-        ));
+        return Err(anyhow!(concat!(
+            "No OpenCode adapter projects found.\n",
+            " Run 'codex-opencode-adapter init' from your project root to create one."
+        )));
     }
     if registry.projects.len() == 1 {
         let (pid, entry) = registry.projects.iter().next().unwrap();

@@ -1,15 +1,14 @@
-﻿mod common;
+mod common;
 
-use codex_opencode_adapter::project::{ProjectRegistry, PROJECT_ENV_FILENAME, sign_adapter_token};
+use codex_opencode_adapter::project::{sign_adapter_token, ProjectRegistry, PROJECT_ENV_FILENAME};
 use common::mock_upstream::start_mock_upstream;
 use common::{adapter_url, start_multi_project_adapter, ProjectConfig};
 use serde_json::Value;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
-// Req 4, part 1: Token routing isolation
-// Different project tokens route to different upstream runtimes, each with
-// its own upstream key, model config, and state DB.
+// Req 4, part 1: Adapter-level tokens work with the shared multi-project adapter.
+// Project routing is carried by the routed model id, not by the bearer token.
 // ---------------------------------------------------------------------------
 #[tokio::test]
 async fn multi_project_token_routes_to_correct_upstream() {
@@ -68,7 +67,7 @@ async fn multi_project_token_routes_to_correct_upstream() {
 }
 
 // ---------------------------------------------------------------------------
-// Req 4, part 2: Invalid / cross-project token blocked
+// Req 4, part 2: Invalid adapter token blocked
 // ---------------------------------------------------------------------------
 #[tokio::test]
 async fn multi_project_wrong_token_gets_401() {
@@ -102,16 +101,18 @@ async fn multi_project_wrong_token_gets_401() {
         .unwrap();
     assert_eq!(resp.status(), 401, "bogus token must get 401");
 
-    // Token with valid format but wrong HMAC -> 401 (i.e. cross-project)
-    // Proj-A's signed token won't validate against proj-B's raw_token
-    // and proj-B won't have a runtime matched by proj-A's token
+    // Token with valid-looking format but wrong HMAC -> 401.
     let resp2 = client
         .get(adapter_url(addr, "/v1/models"))
         .bearer_auth("codex-opencode-nonexistent-00000000000000000000000000000000")
         .send()
         .await
         .unwrap();
-    assert_eq!(resp2.status(), 401, "nonexistent project token must get 401");
+    assert_eq!(
+        resp2.status(),
+        401,
+        "nonexistent project token must get 401"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +158,11 @@ async fn single_adapter_serves_multiple_projects() {
         );
     }
 
-    eprintln!("single adapter on {} serves {} projects", addr, tokens.len());
+    eprintln!(
+        "single adapter on {} serves {} projects",
+        addr,
+        tokens.len()
+    );
 
     // Verify same port for both
     let resp_a = reqwest::Client::new()
@@ -263,9 +268,13 @@ async fn test_admin_refresh_loads_new_project() {
         .unwrap();
     let refresh_status = resp.status();
     let refresh_body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
-    assert_eq!(refresh_status, 200, "refresh with valid token should succeed");
+    assert_eq!(
+        refresh_status, 200,
+        "refresh with valid token should succeed"
+    );
     assert_eq!(refresh_body["status"], "ok", "response status should be ok");
-    let added = refresh_body["added"].as_array()
+    let added = refresh_body["added"]
+        .as_array()
         .expect("response should have 'added' array");
     assert!(
         added.iter().any(|v| v.as_str() == Some(pid_b)),
@@ -284,8 +293,7 @@ async fn test_admin_refresh_loads_new_project() {
     let status = resp.status();
     let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
     assert_eq!(
-        status,
-        200,
+        status, 200,
         "project-b should be accessible after refresh, got: {:?}",
         body
     );

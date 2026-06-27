@@ -153,3 +153,27 @@ fn rust_input_audio() {
     assert_eq!(content[0]["input_audio"]["data"], "base64audio");
     assert_eq!(content[0]["input_audio"]["format"], "wav");
 }
+
+#[test]
+fn rust_tool_choice_tool_search_matches_registered_name() {
+    let body = json!({
+        "model": "opencode-go/deepseek-v4-pro",
+        "input": "Find a tool",
+        "tools": [{"type":"tool_search"}, {"type":"function","name":"my_func","parameters":{"type":"object"}}],
+        "tool_choice": {"type":"tool_search"},
+        "stream": true
+    });
+    let (payload, _messages, _reverse, _tool_ctx) =
+        build_chat_payload(&body, "deepseek-v4-pro", None, json!({})).unwrap();
+    let tools = payload["tools"].as_array().unwrap();
+    let tool_search_registered = tools
+        .iter()
+        .find(|t| t["function"]["name"] == "tool_search")
+        .unwrap();
+    assert_eq!(
+        payload["tool_choice"]["function"]["name"],
+        tool_search_registered["function"]["name"]
+    );
+    assert_eq!(payload["tool_choice"]["function"]["name"], "tool_search");
+    assert_eq!(payload["tool_choice"]["type"], "function");
+}

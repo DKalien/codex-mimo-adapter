@@ -1,4 +1,4 @@
-﻿mod common;
+mod common;
 
 use codex_opencode_adapter::config::Config;
 use codex_opencode_adapter::project::sign_adapter_token;
@@ -182,7 +182,7 @@ async fn test_e2e_legacy_model_format_rejected() {
 
 #[tokio::test]
 async fn dual_project_http_isolation() {
-    use axum::routing::get;
+    use axum::routing::{get, post};
     use axum::Router;
     use std::sync::Mutex;
 
@@ -196,6 +196,7 @@ async fn dual_project_http_isolation() {
     };
     let app_a = Router::new()
         .route("/models", get(mock_models_handler))
+        .route("/chat/completions", post(mock_chat_handler))
         .with_state(mock_a_state);
     let listener_a = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr_a = listener_a.local_addr().unwrap();
@@ -211,6 +212,7 @@ async fn dual_project_http_isolation() {
     };
     let app_b = Router::new()
         .route("/models", get(mock_models_handler))
+        .route("/chat/completions", post(mock_chat_handler))
         .with_state(mock_b_state);
     let listener_b = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr_b = listener_b.local_addr().unwrap();
@@ -223,8 +225,8 @@ async fn dual_project_http_isolation() {
     let db_a = temp_dir.join(format!("dual_http_a_{}.sqlite", uuid::Uuid::new_v4()));
     let db_b = temp_dir.join(format!("dual_http_b_{}.sqlite", uuid::Uuid::new_v4()));
 
-    let pid_a = "opencode_adapter_test_a".to_string();
-    let pid_b = "opencode_adapter_test_b".to_string();
+    let pid_a = "test_a".to_string();
+    let pid_b = "test_b".to_string();
     let raw_a = "local-token-a".to_string();
     let raw_b = "local-token-b".to_string();
 
@@ -314,12 +316,35 @@ async fn dual_project_http_isolation() {
     let models_a = body_a["data"].as_array().expect("A should see model list");
     assert!(!models_a.is_empty(), "A should have at least one model");
     assert!(
-        models_a.iter().any(|m| m["id"] == "opencode_adapter/test_a/opencode-go/model-a"),
-        "models should include test_a model",
+        models_a
+            .iter()
+            .any(|m| m["id"] == "opencode_adapter/test_a/opencode-go/model-a"),
+        "models should include test_a model; got {:?}",
+        models_a
     );
     assert!(
-        models_a.iter().any(|m| m["id"] == "opencode_adapter/test_b/opencode-go/model-b"),
-        "models should include test_b model"
+        models_a
+            .iter()
+            .any(|m| m["id"] == "opencode_adapter/test_b/opencode-go/model-b"),
+        "adapter-level token should see all routed models; got {:?}",
+        models_a
+    );
+    let model_a = models_a[0]["id"].as_str().expect("A model id").to_string();
+    let resp_a_infer = client
+        .post(format!("http://{addr}/v1/responses"))
+        .bearer_auth(&signed_a)
+        .json(&serde_json::json!({
+            "model": model_a,
+            "input": "Hello",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp_a_infer.status(),
+        200,
+        "token A should be able to use the routed model returned by /v1/models"
     );
 
     // --- 2. Another valid adapter token sees the same aggregated routed model list ---
@@ -335,12 +360,18 @@ async fn dual_project_http_isolation() {
     let models_b = body_b["data"].as_array().expect("B should see model list");
     assert!(!models_b.is_empty(), "B should have at least one model");
     assert!(
-        models_b.iter().any(|m| m["id"] == "opencode_adapter/test_b/opencode-go/model-b"),
-        "models should include test_b model",
+        models_b
+            .iter()
+            .any(|m| m["id"] == "opencode_adapter/test_b/opencode-go/model-b"),
+        "models should include test_b model; got {:?}",
+        models_b
     );
     assert!(
-        models_b.iter().any(|m| m["id"] == "opencode_adapter/test_a/opencode-go/model-a"),
-        "models should include test_a model"
+        models_b
+            .iter()
+            .any(|m| m["id"] == "opencode_adapter/test_a/opencode-go/model-a"),
+        "adapter-level token should see all routed models; got {:?}",
+        models_b
     );
 
     // --- 3. Auth header tracking: each upstream received its own key ---
@@ -385,6 +416,23 @@ async fn dual_project_http_isolation() {
     let from_b = state_store_b.get("isolated-response-001").unwrap();
     assert!(from_b.is_none(), "state B should NOT contain A data");
 
+    // --- 5. Cross-project /v1/responses: adapter-level token routes by model project key ---
+    let resp_cross = client
+        .post(format!("http://{addr}/v1/responses"))
+        .bearer_auth(&signed_a)
+        .json(&serde_json::json!({
+            "model": "opencode_adapter/test_b/opencode-go/model-b",
+            "input": "Hello",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp_cross.status(),
+        200,
+        "adapter-level token should be accepted; model route selects project B"
+    );
     // Cleanup DB files.
     let _ = std::fs::remove_file(&db_a);
     let _ = std::fs::remove_file(&db_b);
@@ -404,4 +452,29 @@ async fn mock_models_handler(
         state.auth_recorder.lock().unwrap().push(auth.to_string());
     }
     axum::response::Json(serde_json::json!({"data": [{"id": state.model_id}]}))
+}
+
+async fn mock_chat_handler(
+    axum::extract::State(state): axum::extract::State<MockState>,
+    headers: axum::http::HeaderMap,
+    axum::Json(payload): axum::Json<serde_json::Value>,
+) -> axum::response::Json<serde_json::Value> {
+    if let Some(auth) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        state.auth_recorder.lock().unwrap().push(auth.to_string());
+    }
+    let model = payload
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    axum::response::Json(serde_json::json!({
+        "id": "chatcmpl-dual-project",
+        "object": "chat.completion",
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": "ok"},
+            "finish_reason": "stop"
+        }],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    }))
 }

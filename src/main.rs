@@ -1,4 +1,4 @@
-﻿use clap::Parser;
+use clap::Parser;
 use codex_opencode_adapter::cli::{AuthCommands, Cli, Commands, RunArgs};
 use codex_opencode_adapter::config::{
     Config, ConfigOverrides, DEFAULT_HOST, DEFAULT_MAX_CONCURRENCY, DEFAULT_PORT,
@@ -49,13 +49,13 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
     let config_overrides = ConfigOverrides {
         host: args.host.clone(),
         port: args.port,
-        upstream_base: None,
-        upstream_key: None,
-        local_token: None,
-        state_db: None,
-        state_ttl_seconds: None,
-        timeout_seconds: None,
-        max_request_bytes: None,
+        upstream_base: args.upstream_base.clone(),
+        upstream_key: args.upstream_key.clone(),
+        local_token: args.local_token.clone(),
+        state_db: args.state_db.clone(),
+        state_ttl_seconds: args.state_ttl_seconds,
+        timeout_seconds: args.timeout_seconds,
+        max_request_bytes: args.max_request_bytes,
         max_concurrency: args.max_concurrency,
     };
 
