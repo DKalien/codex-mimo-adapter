@@ -54,6 +54,36 @@ fn rust_request_transform_maps_tools_and_tool_choice() {
     assert_eq!(reverse.get("mcp_read").unwrap(), "mcp.read");
 }
 
+#[test]
+fn plaintext_agent_message_is_forwarded_as_user_task() {
+    let body = json!({
+        "model": "mimo/test-model",
+        "input": [{
+            "type": "agent_message",
+            "author": "/root",
+            "recipient": "/root/portable_deploy",
+            "content": [{
+                "type": "input_text",
+                "text": "Message Type: NEW_TASK\nTask name: /root/portable_deploy\nSender: /root\nPayload:\nBuild the portable package."
+            }]
+        }]
+    });
+
+    let (payload, messages, _reverse, _tool_ctx) =
+        build_chat_payload(&body, "test-model", None, json!({})).unwrap();
+
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["role"], "user");
+    assert_eq!(
+        messages[0]["content"],
+        json!([{
+            "type": "text",
+            "text": "Message Type: NEW_TASK\nTask name: /root/portable_deploy\nSender: /root\nPayload:\nBuild the portable package."
+        }])
+    );
+    assert_eq!(payload["messages"], json!(messages));
+}
+
 // ── Multimodal input tests ──
 
 #[test]

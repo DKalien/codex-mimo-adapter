@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use codex_mimo_adapter::conversion::chat_to_responses::{build_response, response_shell};
 use codex_mimo_adapter::conversion::responses_to_chat::{
     build_chat_payload, function_output_call_ids,
 };
@@ -107,4 +108,129 @@ fn stream_truncated_with_output_can_finalize_as_incomplete() {
         "response.incomplete"
     );
     assert_eq!(stored.lock().expect("stored lock").len(), 1);
+}
+
+#[test]
+fn nonstream_usage_details_are_normalized_without_losing_extra_fields() {
+    let response = build_response(
+        &json!({"model": "mimo/test-model"}),
+        &json!({
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 11,
+                "completion_tokens": 7,
+                "total_tokens": 18,
+                "prompt_tokens_details": {
+                    "cached_tokens": "invalid",
+                    "audio_tokens": 3
+                },
+                "completion_tokens_details": {
+                    "reasoning_tokens": null,
+                    "accepted_prediction_tokens": 2
+                }
+            }
+        }),
+        "mimo/test-model",
+        "test-model",
+        &[],
+        &ToolContext::build(None),
+        |_| Ok(()),
+    )
+    .expect("build nonstream response");
+
+    assert_eq!(
+        response["usage"]["input_tokens_details"]["cached_tokens"],
+        0
+    );
+    assert_eq!(response["usage"]["input_tokens_details"]["audio_tokens"], 3);
+    assert_eq!(
+        response["usage"]["output_tokens_details"]["reasoning_tokens"],
+        0
+    );
+    assert_eq!(
+        response["usage"]["output_tokens_details"]["accepted_prediction_tokens"],
+        2
+    );
+}
+
+#[test]
+fn response_shell_defaults_both_usage_detail_objects() {
+    let response = response_shell(
+        &json!({}),
+        "resp_test",
+        1,
+        "mimo/test-model",
+        vec![],
+        &json!({}),
+        "completed",
+        None,
+    );
+
+    assert_eq!(
+        response["usage"]["input_tokens_details"],
+        json!({"cached_tokens": 0})
+    );
+    assert_eq!(
+        response["usage"]["output_tokens_details"],
+        json!({"reasoning_tokens": 0})
+    );
+}
+
+#[test]
+fn stream_completed_usage_has_required_detail_fields() {
+    let emitted = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
+    let emitted_for_put = emitted.clone();
+    let mut assembler = StreamAssembler::new(
+        json!({"model": "mimo/test-model", "stream": true}),
+        "mimo/test-model".to_string(),
+        "test-model".to_string(),
+        vec![],
+        ToolContext::build(None),
+        Box::new(|_| Ok(())),
+        Box::new(move |event, payload| {
+            emitted_for_put
+                .lock()
+                .expect("emitted lock")
+                .push((event.to_string(), payload));
+            Ok(())
+        }),
+    );
+
+    assembler.start().expect("start stream");
+    assembler
+        .accept(&json!({
+            "choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 4,
+                "completion_tokens": 2,
+                "prompt_tokens_details": {"cache_creation_tokens": 1},
+                "completion_tokens_details": "malformed"
+            }
+        }))
+        .expect("accept terminal chunk");
+    let response = assembler.finalize().expect("finalize stream");
+
+    assert_eq!(
+        response["usage"]["input_tokens_details"]["cached_tokens"],
+        0
+    );
+    assert_eq!(
+        response["usage"]["input_tokens_details"]["cache_creation_tokens"],
+        1
+    );
+    assert_eq!(
+        response["usage"]["output_tokens_details"]["reasoning_tokens"],
+        0
+    );
+    let completed = emitted
+        .lock()
+        .expect("emitted lock")
+        .iter()
+        .find(|(event, _)| event == "response.completed")
+        .cloned()
+        .expect("response.completed event");
+    assert_eq!(
+        completed.1["response"]["usage"], response["usage"],
+        "terminal event and final response should share normalized usage"
+    );
 }

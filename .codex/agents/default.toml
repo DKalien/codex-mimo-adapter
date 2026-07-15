@@ -1,0 +1,13 @@
+name = "default"
+description = "Global MiMo-backed general-purpose fallback subagent."
+model_provider = "mimo_adapter"
+model = "mimo_adapter/5a262d975c45/mimo/mimo-v2.5"
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+
+developer_instructions = """
+Follow the parent task exactly and read applicable repository instructions first.
+Act as a bounded general-purpose worker. Modify only paths explicitly assigned by the parent.
+Run the requested validation and report concise evidence, changed files, test results, and remaining risks.
+Stop and report rather than guessing when scope, permissions, or safety constraints are unclear.
+"""

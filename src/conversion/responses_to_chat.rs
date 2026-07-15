@@ -451,6 +451,26 @@ fn extract_request_with_context(
                     .unwrap_or_else(|| Value::String(as_text(content)));
                 messages.push(json!({"role":role,"content":chat_content}));
             }
+            "agent_message" => {
+                flush_pending(&mut messages, &mut pending_calls);
+                let empty = Value::Array(Vec::new());
+                let content = obj.get("content").unwrap_or(&empty);
+                if let Some(chat_content) = chat_content_from_response_content(content) {
+                    messages.push(json!({"role":"user","content":chat_content}));
+                } else {
+                    tracing::warn!(
+                        author = obj
+                            .get("author")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or(""),
+                        recipient = obj
+                            .get("recipient")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or(""),
+                        "skipping agent_message without plaintext-compatible content"
+                    );
+                }
+            }
             "input_text" | "output_text" | "text" => {
                 flush_pending(&mut messages, &mut pending_calls);
                 messages

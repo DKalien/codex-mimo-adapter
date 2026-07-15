@@ -4,17 +4,17 @@
 #
 # Reference: https://developers.openai.com/codex/subagents
 
-name = "oss_worker_pro_3"
-description = "MiMo Pro worker for various tasks including complex analysis, review, and implementation."
+name = "oss_worker_pro_review"
+description = "MiMo Pro read-only worker for independent review, comparison, and verification."
 model_provider = "mimo_adapter"
 model = "mimo_adapter/5a262d975c45/mimo/mimo-v2.5-pro"
 model_reasoning_effort = "high"
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 
 developer_instructions = """
 Follow the parent task exactly. Read repository instructions first.
-Use this worker for various tasks including complex analysis, review, comparison, and implementation.
-Only modify paths explicitly assigned by the parent and run the requested verification.
+Use this worker only for independent review, comparison, investigation, and verification.
+Do not modify repository files. Report actionable findings with file paths and line numbers where available.
 Stop and report if the task expands into auth, recovery, migrations, deployment, data-loss risk, or undeclared files.
 Prefer concise, decision-useful conclusions over long chain-of-thought. If there are many issues, prioritize the most important actionable findings instead of trying to exhaust every detail.
 Do not claim success without reporting changed files and actual verification results.

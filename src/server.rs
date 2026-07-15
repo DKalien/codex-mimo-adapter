@@ -824,7 +824,7 @@ fn responses_failed_value(body: &Value, model: &str, kind: &str, message: &str) 
         "parallel_tool_calls": body.get("parallel_tool_calls").and_then(Value::as_bool).unwrap_or(false),
         "previous_response_id": body.get("previous_response_id").cloned().unwrap_or(Value::Null),
         "store": false,
-        "usage": {"input_tokens":0,"output_tokens":0,"total_tokens":0},
+        "usage": empty_response_usage(),
         "metadata": body.get("metadata").cloned().unwrap_or_else(|| json!({}))
     })
 }
@@ -837,7 +837,7 @@ fn early_stream_failed_response(
 ) -> Response {
     let response_id = format!("resp_{}", Uuid::new_v4().simple());
     let created_at = now_ts();
-    let shell = json!({"id":response_id,"object":"response","created_at":created_at,"status":"in_progress","error":null,"incomplete_details":null,"instructions":body.get("instructions").cloned().unwrap_or(Value::Null),"model":model_alias,"output":[],"parallel_tool_calls":body.get("parallel_tool_calls").and_then(Value::as_bool).unwrap_or(false),"previous_response_id":body.get("previous_response_id").cloned().unwrap_or(Value::Null),"store":false,"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0},"metadata":body.get("metadata").cloned().unwrap_or_else(|| json!({}))});
+    let shell = json!({"id":response_id,"object":"response","created_at":created_at,"status":"in_progress","error":null,"incomplete_details":null,"instructions":body.get("instructions").cloned().unwrap_or(Value::Null),"model":model_alias,"output":[],"parallel_tool_calls":body.get("parallel_tool_calls").and_then(Value::as_bool).unwrap_or(false),"previous_response_id":body.get("previous_response_id").cloned().unwrap_or(Value::Null),"store":false,"usage":empty_response_usage(),"metadata":body.get("metadata").cloned().unwrap_or_else(|| json!({}))});
     let (tx, rx) =
         tokio::sync::mpsc::unbounded_channel::<Result<axum::response::sse::Event, Infallible>>();
     let _ = tx.send(Ok(axum::response::sse::Event::default()
@@ -862,6 +862,16 @@ fn early_stream_failed_response(
     let _ = tx.send(Ok(axum::response::sse::Event::default().data("[DONE]")));
     let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
     Sse::new(stream).into_response()
+}
+
+fn empty_response_usage() -> Value {
+    json!({
+        "input_tokens": 0,
+        "input_tokens_details": {"cached_tokens": 0},
+        "output_tokens": 0,
+        "output_tokens_details": {"reasoning_tokens": 0},
+        "total_tokens": 0
+    })
 }
 
 fn stream_failed_response(
@@ -944,5 +954,31 @@ fn upstream_error(error: UpstreamError) -> Response {
         UpstreamError::Network(message) | UpstreamError::Invalid(message) => {
             error_response(StatusCode::BAD_GATEWAY, "upstream_error", &message)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manual_responses_error_has_complete_usage_shape() {
+        let response = responses_failed_value(
+            &json!({"metadata": {"request": "test"}}),
+            "mimo/test-model",
+            "upstream_error",
+            "failed",
+        );
+
+        assert_eq!(
+            response["usage"],
+            json!({
+                "input_tokens": 0,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 0,
+                "output_tokens_details": {"reasoning_tokens": 0},
+                "total_tokens": 0
+            })
+        );
     }
 }

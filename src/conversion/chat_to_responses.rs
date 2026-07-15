@@ -267,19 +267,23 @@ pub fn response_shell(
         .get("total_tokens")
         .and_then(Value::as_i64)
         .unwrap_or(input_tokens + output_tokens);
-    let mut response_usage = json!({"input_tokens":input_tokens,"output_tokens":output_tokens,"total_tokens":total_tokens});
-    if let Some(details) = usage
-        .get("input_tokens_details")
-        .or_else(|| usage.get("prompt_tokens_details"))
-    {
-        response_usage["input_tokens_details"] = details.clone();
-    }
-    if let Some(details) = usage
-        .get("output_tokens_details")
-        .or_else(|| usage.get("completion_tokens_details"))
-    {
-        response_usage["output_tokens_details"] = details.clone();
-    }
+    let response_usage = json!({
+        "input_tokens": input_tokens,
+        "input_tokens_details": normalize_token_details(
+            usage,
+            "input_tokens_details",
+            "prompt_tokens_details",
+            "cached_tokens",
+        ),
+        "output_tokens": output_tokens,
+        "output_tokens_details": normalize_token_details(
+            usage,
+            "output_tokens_details",
+            "completion_tokens_details",
+            "reasoning_tokens",
+        ),
+        "total_tokens": total_tokens,
+    });
     json!({
         "id": response_id,
         "object":"response",
@@ -296,4 +300,24 @@ pub fn response_shell(
         "usage": response_usage,
         "metadata": body.get("metadata").cloned().unwrap_or_else(|| json!({}))
     })
+}
+
+fn normalize_token_details(
+    usage: &Value,
+    responses_key: &str,
+    chat_key: &str,
+    required_key: &str,
+) -> Value {
+    let mut details = usage
+        .get(responses_key)
+        .or_else(|| usage.get(chat_key))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let required_value = details
+        .get(required_key)
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    details.insert(required_key.to_string(), Value::from(required_value));
+    Value::Object(details)
 }

@@ -4,16 +4,16 @@
 #
 # Reference: https://developers.openai.com/codex/subagents
 
-name = "oss_worker_std_2"
-description = "MiMo worker for various tasks including multimodal and lightweight implementation."
+name = "oss_worker_std_test"
+description = "MiMo standard worker for focused tests, verification, and test-supporting changes."
 model_provider = "mimo_adapter"
 model = "mimo_adapter/5a262d975c45/mimo/mimo-v2.5"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 
 developer_instructions = """
 Follow the parent task exactly. Read repository instructions first.
-Use this worker for various tasks including multimodal tasks, text processing, and lightweight implementation.
+Use this worker for focused tests, verification, and test-supporting changes.
 Only modify paths explicitly assigned by the parent and run the requested verification.
 Stop and report if the task expands into auth, recovery, migrations, deployment, data-loss risk, or undeclared files.
 Prefer concise, decision-useful conclusions and avoid long reasoning, full-file dumps, or large logs unless explicitly requested.
