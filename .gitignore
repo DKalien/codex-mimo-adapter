@@ -11,3 +11,6 @@ tmp_*
 
 build/
 dist/
+
+# Local config with secrets
+.codex/config.toml
