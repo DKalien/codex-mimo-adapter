@@ -28,13 +28,13 @@ use crate::project::{
 use crate::state::{now_ts, StateStore};
 use crate::upstream::{
     extract_error_message, parse_chat_sse_bytes, sse_data_from_block, sse_event_from_block,
-    OpenCodeGoClient, UpstreamError,
+    MimoClient, UpstreamError,
 };
 
 #[derive(Clone)]
 pub struct ProjectRuntime {
     pub config: Config,
-    pub client: OpenCodeGoClient,
+    pub client: MimoClient,
     pub state: StateStore,
 }
 
@@ -85,9 +85,9 @@ async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
                 data.extend(rows.into_iter().filter_map(|row| {
                     row.get("id").and_then(Value::as_str).map(|id| {
                         json!({
-                            "id":format!("opencode_adapter/{project_key}/opencode-go/{id}"),
+                            "id":format!("mimo_adapter/{project_key}/mimo/{id}"),
                             "object":"model",
-                            "owned_by":"opencode-go"
+                            "owned_by":"mimo"
                         })
                     })
                 }));
@@ -151,7 +151,7 @@ async fn responses(State(state): State<AppState>, headers: HeaderMap, body: Stri
                     StatusCode::BAD_REQUEST,
                     "project_not_found",
                     &format!(
-                        "Project route {project_id} is not loaded. Run 'codex-opencode-adapter init' for that project and call POST /admin/refresh."
+                        "Project route {project_id} is not loaded. Run 'codex-mimo-adapter init' for that project and call POST /admin/refresh."
                     ),
                 ).into_response();
             }
@@ -641,7 +641,7 @@ fn authorize_adapter(
     Err(Box::new(error_response(
         StatusCode::UNAUTHORIZED,
         "unauthorized",
-        "Invalid or expired adapter token. Run 'codex-opencode-adapter auth print-local-token' again.",
+        "Invalid or expired adapter token. Run 'codex-mimo-adapter auth print-local-token' again.",
     )))
 }
 
@@ -699,7 +699,9 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
             Ok(e) => e,
             Err(e) => {
                 tracing::warn!("refresh: cannot read env for {project_id}: {e}");
-                failed.push(json!({"project_id": project_id, "reason": format!("read env failed: {e}")}));
+                failed.push(
+                    json!({"project_id": project_id, "reason": format!("read env failed: {e}")}),
+                );
                 continue;
             }
         };
@@ -709,7 +711,8 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("refresh: bad config for {project_id}: {e}");
-                failed.push(json!({"project_id": project_id, "reason": format!("bad config: {e}")}));
+                failed
+                    .push(json!({"project_id": project_id, "reason": format!("bad config: {e}")}));
                 continue;
             }
         };
@@ -721,11 +724,13 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("refresh: cannot create state for {project_id}: {e}");
-                failed.push(json!({"project_id": project_id, "reason": format!("state init failed: {e}")}));
+                failed.push(
+                    json!({"project_id": project_id, "reason": format!("state init failed: {e}")}),
+                );
                 continue;
             }
         };
-        let client = match OpenCodeGoClient::new(
+        let client = match MimoClient::new(
             &config.upstream_base,
             &config.upstream_key,
             config.timeout_seconds,
@@ -733,7 +738,9 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("refresh: cannot create client for {project_id}: {e}");
-                failed.push(json!({"project_id": project_id, "reason": format!("client init failed: {e}")}));
+                failed.push(
+                    json!({"project_id": project_id, "reason": format!("client init failed: {e}")}),
+                );
                 continue;
             }
         };
@@ -752,8 +759,8 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
 }
 
 fn parse_routed_model(model: &str) -> Result<(String, String), &'static str> {
-    let Some(rest) = model.strip_prefix("opencode_adapter/") else {
-        return Err("model must use opencode_adapter/<project_key>/<real_model>. Run 'codex-opencode-adapter init' to refresh agent templates.");
+    let Some(rest) = model.strip_prefix("mimo_adapter/") else {
+        return Err("model must use mimo_adapter/<project_key>/<real_model>. Run 'codex-mimo-adapter init' to refresh agent templates.");
     };
     let Some((project_key, real_model)) = rest.split_once('/') else {
         return Err("model must include both project_key and real_model");
@@ -764,8 +771,8 @@ fn parse_routed_model(model: &str) -> Result<(String, String), &'static str> {
     if real_model.is_empty() {
         return Err("real model id is empty");
     }
-    let Some(upstream_model) = real_model.strip_prefix("opencode-go/") else {
-        return Err("real_model must use the opencode-go/ prefix");
+    let Some(upstream_model) = real_model.strip_prefix("mimo/") else {
+        return Err("real_model must use the mimo/ prefix");
     };
     if upstream_model.is_empty() {
         return Err("real model id is empty");
@@ -835,16 +842,23 @@ fn early_stream_failed_response(
         tokio::sync::mpsc::unbounded_channel::<Result<axum::response::sse::Event, Infallible>>();
     let _ = tx.send(Ok(axum::response::sse::Event::default()
         .event("response.created")
-        .data(json!({"type":"response.created","response":shell.clone()}).to_string())));
+        .data(
+            json!({"type":"response.created","response":shell.clone()}).to_string(),
+        )));
     let _ = tx.send(Ok(axum::response::sse::Event::default()
         .event("response.in_progress")
-        .data(json!({"type":"response.in_progress","response":shell.clone()}).to_string())));
+        .data(
+            json!({"type":"response.in_progress","response":shell.clone()}).to_string(),
+        )));
     let mut failed_response = shell;
     failed_response["status"] = json!("failed");
-    failed_response["error"] = json!({"type":kind,"code":kind,"message":message.chars().take(1000).collect::<String>()});
+    failed_response["error"] =
+        json!({"type":kind,"code":kind,"message":message.chars().take(1000).collect::<String>()});
     let _ = tx.send(Ok(axum::response::sse::Event::default()
         .event("response.failed")
-        .data(json!({"type":"response.failed","response":failed_response}).to_string())));
+        .data(
+            json!({"type":"response.failed","response":failed_response}).to_string(),
+        )));
     let _ = tx.send(Ok(axum::response::sse::Event::default().data("[DONE]")));
     let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
     Sse::new(stream).into_response()

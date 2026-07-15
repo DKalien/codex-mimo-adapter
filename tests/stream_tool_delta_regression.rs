@@ -1,13 +1,13 @@
-use codex_opencode_adapter::conversion::responses_to_chat::build_chat_payload;
-use codex_opencode_adapter::conversion::StreamAssembler;
-use codex_opencode_adapter::state::StoredResponse;
+use codex_mimo_adapter::conversion::responses_to_chat::build_chat_payload;
+use codex_mimo_adapter::conversion::StreamAssembler;
+use codex_mimo_adapter::state::StoredResponse;
 use serde_json::{json, Map, Value};
 use std::sync::{Arc, Mutex};
 
 #[test]
 fn streaming_function_tool_accepts_split_id_name_and_arguments() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Run a command",
         "tools": [{"type":"function","name":"run","parameters":{"type":"object"}}],
         "stream": true
@@ -66,7 +66,7 @@ fn streaming_function_tool_accepts_split_id_name_and_arguments() {
 #[test]
 fn streaming_function_tool_buffers_arguments_until_id_and_name_arrive() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Run a command",
         "tools": [{"type":"function","name":"run","parameters":{"type":"object"}}],
         "stream": true
@@ -117,7 +117,7 @@ fn streaming_function_tool_buffers_arguments_until_id_and_name_arrive() {
 #[test]
 fn streaming_multiple_tool_call_indexes_are_kept_separate() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Use two tools",
         "tools": [
             {"type":"function","name":"run","parameters":{"type":"object"}},
@@ -172,7 +172,7 @@ fn streaming_multiple_tool_call_indexes_are_kept_separate() {
 #[test]
 fn streaming_function_custom_and_tool_search_types_do_not_cross() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Use all tool kinds",
         "tools": [
             {"type":"function","name":"run","parameters":{"type":"object"}},
@@ -257,7 +257,7 @@ fn streaming_function_custom_and_tool_search_types_do_not_cross() {
 #[test]
 fn streaming_tool_call_without_name_is_skipped_and_does_not_pollute_state() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Malformed tool call",
         "tools": [{"type":"function","name":"run","parameters":{"type":"object"}}],
         "stream": true
@@ -303,7 +303,7 @@ fn new_assembler(
     let stored_for_put = Arc::clone(&stored);
     let assembler = StreamAssembler::new(
         body,
-        "opencode-go/deepseek-v4-pro".to_string(),
+        "mimo/deepseek-v4-pro".to_string(),
         "deepseek-v4-pro".to_string(),
         messages,
         tool_ctx,

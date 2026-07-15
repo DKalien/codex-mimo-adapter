@@ -2,7 +2,7 @@
 param(
     [string]$ListenHost = "127.0.0.1",
     [int]$Port = 4010,
-    [string]$LocalToken = "codex-opencode-local"
+    [string]$LocalToken = "codex-mimo-local"
 )
 
 $ErrorActionPreference = "Stop"

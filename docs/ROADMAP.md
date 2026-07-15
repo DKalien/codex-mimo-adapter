@@ -15,9 +15,9 @@ The project is in the protocol-compatibility and validation phase.
 | Multimodal input conversion | Implemented, real validation passed | Request-side image/file/audio conversion, text-only model guard, and a real MiMo vision smoke path have been verified |
 | Non-stream upstream failure shape | Implemented, real validation passed | `/v1/responses` non-stream upstream HTTP errors return a Responses `status: failed` body while preserving upstream HTTP status |
 | Multimodal output generation | Planned | Current phase keeps text output reliable; image/audio/file output mapping is planned for later phases |
-| Other upstream providers | Planned | Current default target is OpenCode Go |
-| Mock integration tests | Implemented | L2 tests use mock upstream behavior and do not require external OpenCode Go calls |
-| Real OpenCode Go upstream smoke | Implemented | Real `/v1/models`, text, stream, function-call, continuation, multimodal, custom tool, and tool-search smoke validation completed on 2026-06-25 |
+| Other upstream providers | Planned | Current default target is MiMo Token Plan |
+| Mock integration tests | Implemented | L2 tests use mock upstream behavior and do not require external MiMo Token Plan calls |
+| Real MiMo Token Plan upstream smoke | Implemented | Real `/v1/models`, text, stream, function-call, continuation, multimodal, custom tool, and tool-search smoke validation completed on 2026-06-25 |
 | Real Codex subagent E2E | Partial | Project custom subagent smoke has been exercised, but broader end-to-end Codex task validation is still pending |
 
 ## Completed protocol work
@@ -79,7 +79,7 @@ Detailed validation steps are in `docs/VALIDATION.zh-CN.md`, and the latest exec
 
 After the repeatable smoke layer is stable:
 
-- Configure Codex subagent to call this adapter as `opencode-go/...` models.
+- Configure Codex subagent to call this adapter as `mimo/...` models.
 - Run a real text-only subagent task.
 - Run a real tool-using subagent task.
 - Run a real streaming tool-using subagent task.
@@ -99,7 +99,7 @@ Planned after the text/tool/reasoning path is stable against real Codex subagent
 
 ## Long-term additional upstream support
 
-Planned after OpenCode Go is validated:
+Planned after MiMo Token Plan is validated:
 
 - Add a small provider/profile boundary for upstreams that are mostly OpenAI Chat Completions-compatible.
 - Keep Codex Responses as the stable frontend contract.

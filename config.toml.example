@@ -1,38 +1,38 @@
-﻿# IMPORTANT:
+# IMPORTANT:
 # Merge this provider block into the user-level Codex configuration:
 #   Windows: %USERPROFILE%\.codex\config.toml
 # Do not place model_providers in this project's .codex/config.toml.
 # Codex ignores project-level model provider definitions.
 #
-# The `init` command creates a single opencode_go_adapter provider
-# for all projects.  Each project carries its own CODEX_OPENCODE_PROJECT_ID
-# in .codex-opencode-adapter.env for isolation at the adapter level.
+# The `init` command creates a single mimo_adapter provider
+# for all projects.  Each project carries its own CODEX_MIMO_PROJECT_ID
+# in .codex-mimo-adapter.env for isolation at the adapter level.
 
-[model_providers.opencode_go_adapter]
-name = "OpenCode Go Adapter"
+[model_providers.mimo_adapter]
+name = "MiMo Token Plan Adapter"
 base_url = "http://127.0.0.1:4010/v1"
 wire_api = "responses"
 request_max_retries = 0
 stream_max_retries = 0
 stream_idle_timeout_ms = 120000
 
-[model_providers.opencode_go_adapter.auth]
-command = "codex-opencode-adapter"
+[model_providers.mimo_adapter.auth]
+command = "codex-mimo-adapter"
 args = ["auth", "print-local-token"]
 timeout_ms = 5000
 
 [agents.oss_mimo]
-description = "OpenCode Go MiMo worker"
+description = "MiMo Token Plan worker"
 config_file = ".codex/agents/oss-mimo.toml"
 
 [agents.oss_flash]
-description = "Low-cost OpenCode Go Flash worker"
+description = "Low-cost MiMo Token Plan Flash worker"
 config_file = ".codex/agents/oss-flash.toml"
 
 [agents.oss_minimax]
-description = "OpenCode Go Minimax worker"
+description = "MiMo Token Plan multimodal worker"
 config_file = ".codex/agents/oss-minimax.toml"
 
 [agents.oss_pro]
-description = "OpenCode Go DeepSeek Pro worker"
+description = "MiMo Token Plan Pro worker"
 config_file = ".codex/agents/oss-pro.toml"

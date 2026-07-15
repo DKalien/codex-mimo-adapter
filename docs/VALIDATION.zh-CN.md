@@ -2,14 +2,14 @@
 
 ## 目标
 
-这份手册用于在完整 Codex subagent 验证前，先用真实 OpenCode Go API Key 验证 adapter 的基础协议链路。
+这份手册用于在完整 Codex subagent 验证前，先用真实 MiMo Token Plan API Key 验证 adapter 的基础协议链路。
 
 按顺序执行。遇到第一个失败点就停止，记录请求、响应、模型 ID 和 adapter 日志。
 
 ## 0. 验证前检查
 
 ```powershell
-cd D:\AI-Tools\codex-opencode-adapter
+cd D:\AI-Tools\codex-mimo-adapter
 git status --short
 cargo fmt --check
 cargo test
@@ -26,10 +26,10 @@ cargo test
 单独开一个终端运行：
 
 ```powershell
-codex-opencode-adapter init --api-key "<你的 OpenCode Go API Key>"
-$env:CODEX_OPENCODE_MAX_CONCURRENCY = "1"
-$env:RUST_LOG = "codex_opencode_adapter=debug"
-codex-opencode-adapter start
+codex-mimo-adapter init --api-key "<你的 MiMo Token Plan API Key>"
+$env:CODEX_MIMO_MAX_CONCURRENCY = "1"
+$env:RUST_LOG = "codex_mimo_adapter=debug"
+codex-mimo-adapter start
 ```
 
 第一轮真实验证建议把并发设为 `1`。串行链路稳定后再提高并发。
@@ -51,13 +51,13 @@ status = ok
 检查模型列表：
 
 ```powershell
-$token = codex-opencode-adapter auth print-local-token
+$token = codex-mimo-adapter auth print-local-token
 $headers = @{ Authorization = "Bearer $token" }
 $model = ((Invoke-RestMethod http://127.0.0.1:4010/v1/models -Headers $headers).data.id | Select-Object -First 1)
 $model
 ```
 
-记录准备测试的模型 ID。它应带 `opencode_adapter/<project_key>/opencode-go/<id>` 前缀；后续请求都复用 `$model`。
+记录准备测试的模型 ID。它应带 `mimo_adapter/<project_key>/mimo/<id>` 前缀；后续请求都复用 `$model`。
 
 ## 3. 非流式文本 smoke
 
@@ -79,7 +79,7 @@ Invoke-RestMethod http://127.0.0.1:4010/v1/responses `
 
 - `object = response`
 - `status = completed`
-- `model` 仍是带 `opencode_adapter/<project_key>/opencode-go/` 前缀的 routed model
+- `model` 仍是带 `mimo_adapter/<project_key>/mimo/` 前缀的 routed model
 - 输出文本包含 `adapter-ok`
 - 如果上游返回 usage，adapter 响应中也保留 usage shape
 
@@ -269,7 +269,7 @@ stream = true
 用：
 
 ```powershell
-$env:RUST_LOG = "codex_opencode_adapter=debug"
+$env:RUST_LOG = "codex_mimo_adapter=debug"
 ```
 
 重点观察：
@@ -294,7 +294,7 @@ Date:
 Adapter commit:
 OS / shell:
 Codex client:
-OpenCode Go base URL:
+MiMo Token Plan base URL:
 Model alias used:
 Upstream model ID after prefix stripping:
 Request type: non-stream | stream

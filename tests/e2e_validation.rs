@@ -1,10 +1,10 @@
 mod common;
 
-use codex_opencode_adapter::config::Config;
-use codex_opencode_adapter::project::sign_adapter_token;
-use codex_opencode_adapter::server::{self, AppState, ProjectRuntime};
-use codex_opencode_adapter::state::StateStore;
-use codex_opencode_adapter::upstream::OpenCodeGoClient;
+use codex_mimo_adapter::config::Config;
+use codex_mimo_adapter::project::sign_adapter_token;
+use codex_mimo_adapter::server::{self, AppState, ProjectRuntime};
+use codex_mimo_adapter::state::StateStore;
+use codex_mimo_adapter::upstream::MimoClient;
 use common::mock_upstream::start_mock_upstream;
 use common::{adapter_url, routed_model, start_adapter};
 use serde_json::json;
@@ -22,7 +22,7 @@ async fn test_e2e_request_payload_shape() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "model": routed_model("mimo/deepseek-v4-flash"),
             "instructions": "You are a helpful assistant.",
             "input": [{"type": "message", "role": "user", "content": "Hi"}],
             "stream": false
@@ -78,7 +78,7 @@ async fn test_e2e_request_payload_streaming_shape() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "model": routed_model("mimo/deepseek-v4-flash"),
             "input": "Hi",
             "stream": true
         }))
@@ -116,7 +116,7 @@ async fn test_e2e_auth_required() {
     let resp = unauth_client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "model": routed_model("mimo/deepseek-v4-flash"),
             "input": "Hello",
             "stream": false
         }))
@@ -130,7 +130,7 @@ async fn test_e2e_auth_required() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "model": routed_model("mimo/deepseek-v4-flash"),
             "input": "Hello",
             "stream": false
         }))
@@ -145,12 +145,12 @@ async fn test_e2e_missing_model_prefix() {
     let (upstream_addr, _mock, _received) = start_mock_upstream().await;
     let adapter = start_adapter(upstream_addr, None).await;
 
-    // Routed model without opencode-go/ real-model prefix should be rejected.
+    // Routed model without mimo/ real-model prefix should be rejected.
     let resp = adapter
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": "opencode_adapter/test_project/deepseek-v4-flash",
+            "model": "mimo_adapter/test_project/deepseek-v4-flash",
             "input": "Hello",
             "stream": false
         }))
@@ -169,7 +169,7 @@ async fn test_e2e_legacy_model_format_rejected() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": "opencode-go/deepseek-v4-flash",
+            "model": "mimo/deepseek-v4-flash",
             "input": "Hello",
             "stream": false
         }))
@@ -255,13 +255,13 @@ async fn dual_project_http_isolation() {
         max_concurrency: 10,
     };
 
-    let client_a = OpenCodeGoClient::new(
+    let client_a = MimoClient::new(
         &config_a.upstream_base,
         &config_a.upstream_key,
         config_a.timeout_seconds,
     )
     .unwrap();
-    let client_b = OpenCodeGoClient::new(
+    let client_b = MimoClient::new(
         &config_b.upstream_base,
         &config_b.upstream_key,
         config_b.timeout_seconds,
@@ -318,14 +318,14 @@ async fn dual_project_http_isolation() {
     assert!(
         models_a
             .iter()
-            .any(|m| m["id"] == "opencode_adapter/test_a/opencode-go/model-a"),
+            .any(|m| m["id"] == "mimo_adapter/test_a/mimo/model-a"),
         "models should include test_a model; got {:?}",
         models_a
     );
     assert!(
         models_a
             .iter()
-            .any(|m| m["id"] == "opencode_adapter/test_b/opencode-go/model-b"),
+            .any(|m| m["id"] == "mimo_adapter/test_b/mimo/model-b"),
         "adapter-level token should see all routed models; got {:?}",
         models_a
     );
@@ -362,14 +362,14 @@ async fn dual_project_http_isolation() {
     assert!(
         models_b
             .iter()
-            .any(|m| m["id"] == "opencode_adapter/test_b/opencode-go/model-b"),
+            .any(|m| m["id"] == "mimo_adapter/test_b/mimo/model-b"),
         "models should include test_b model; got {:?}",
         models_b
     );
     assert!(
         models_b
             .iter()
-            .any(|m| m["id"] == "opencode_adapter/test_a/opencode-go/model-a"),
+            .any(|m| m["id"] == "mimo_adapter/test_a/mimo/model-a"),
         "adapter-level token should see all routed models; got {:?}",
         models_b
     );
@@ -401,10 +401,10 @@ async fn dual_project_http_isolation() {
     }
 
     // --- 4. State isolation: put into A, verify B cannot read it ---
-    use codex_opencode_adapter::state::now_ts;
-    let stored = codex_opencode_adapter::state::StoredResponse {
+    use codex_mimo_adapter::state::now_ts;
+    let stored = codex_mimo_adapter::state::StoredResponse {
         response_id: "isolated-response-001".to_string(),
-        model_alias: "opencode-go/test".to_string(),
+        model_alias: "mimo/test".to_string(),
         model_upstream: "test".to_string(),
         messages: vec![],
         pending_call_ids: vec![],
@@ -421,7 +421,7 @@ async fn dual_project_http_isolation() {
         .post(format!("http://{addr}/v1/responses"))
         .bearer_auth(&signed_a)
         .json(&serde_json::json!({
-            "model": "opencode_adapter/test_b/opencode-go/model-b",
+            "model": "mimo_adapter/test_b/mimo/model-b",
             "input": "Hello",
             "stream": false
         }))

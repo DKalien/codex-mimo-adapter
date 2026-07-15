@@ -4,8 +4,8 @@ use std::net::SocketAddr;
 
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: u16 = 4010;
-pub const DEFAULT_UPSTREAM_BASE: &str = "https://opencode.ai/zen/go/v1";
-pub const DEFAULT_STATE_DB: &str = ".codex-opencode/state.sqlite";
+pub const DEFAULT_UPSTREAM_BASE: &str = "https://token-plan-cn.xiaomimimo.com/v1";
+pub const DEFAULT_STATE_DB: &str = ".codex-mimo/state.sqlite";
 pub const DEFAULT_STATE_TTL_SECONDS: i64 = 21_600;
 pub const DEFAULT_TIMEOUT_SECONDS: u64 = 300;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
@@ -46,10 +46,10 @@ impl Config {
 
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.local_token.as_deref() == Some(self.upstream_key.as_str()) {
-            anyhow::bail!("CODEX_OPENCODE_LOCAL_TOKEN must differ from OPENCODE_GO_API_KEY");
+            anyhow::bail!("CODEX_MIMO_LOCAL_TOKEN must differ from MIMO_API_KEY");
         }
         if self.max_concurrency == 0 {
-            anyhow::bail!("CODEX_OPENCODE_MAX_CONCURRENCY must be greater than zero");
+            anyhow::bail!("CODEX_MIMO_MAX_CONCURRENCY must be greater than zero");
         }
         Ok(())
     }
@@ -63,68 +63,64 @@ impl Config {
             overrides.host,
             project_env,
             env,
-            "CODEX_OPENCODE_HOST",
+            "CODEX_MIMO_HOST",
             DEFAULT_HOST,
         );
         let port = choose_parse(
             overrides.port,
             project_env,
             env,
-            "CODEX_OPENCODE_PORT",
+            "CODEX_MIMO_PORT",
             DEFAULT_PORT,
         )?;
         let upstream_base = choose_string(
             overrides.upstream_base,
             project_env,
             env,
-            "OPENCODE_GO_BASE_URL",
+            "MIMO_API_BASE_URL",
             DEFAULT_UPSTREAM_BASE,
         );
-        let upstream_key = choose_required_string(
-            overrides.upstream_key,
-            project_env,
-            env,
-            "OPENCODE_GO_API_KEY",
-        )?;
+        let upstream_key =
+            choose_required_string(overrides.upstream_key, project_env, env, "MIMO_API_KEY")?;
         let local_token = choose_optional_string(
             overrides.local_token,
             project_env,
             env,
-            "CODEX_OPENCODE_LOCAL_TOKEN",
+            "CODEX_MIMO_LOCAL_TOKEN",
         );
         let state_db = choose_string(
             overrides.state_db,
             project_env,
             env,
-            "CODEX_OPENCODE_STATE_DB",
+            "CODEX_MIMO_STATE_DB",
             DEFAULT_STATE_DB,
         );
         let state_ttl_seconds = choose_parse(
             overrides.state_ttl_seconds,
             project_env,
             env,
-            "CODEX_OPENCODE_STATE_TTL_SECONDS",
+            "CODEX_MIMO_STATE_TTL_SECONDS",
             DEFAULT_STATE_TTL_SECONDS,
         )?;
         let timeout_seconds = choose_parse(
             overrides.timeout_seconds,
             project_env,
             env,
-            "CODEX_OPENCODE_TIMEOUT_SECONDS",
+            "CODEX_MIMO_TIMEOUT_SECONDS",
             DEFAULT_TIMEOUT_SECONDS,
         )?;
         let max_request_bytes = choose_parse(
             overrides.max_request_bytes,
             project_env,
             env,
-            "CODEX_OPENCODE_MAX_REQUEST_BYTES",
+            "CODEX_MIMO_MAX_REQUEST_BYTES",
             DEFAULT_MAX_REQUEST_BYTES,
         )?;
         let max_concurrency = choose_parse(
             overrides.max_concurrency,
             project_env,
             env,
-            "CODEX_OPENCODE_MAX_CONCURRENCY",
+            "CODEX_MIMO_MAX_CONCURRENCY",
             DEFAULT_MAX_CONCURRENCY,
         )?;
 

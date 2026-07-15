@@ -1,5 +1,5 @@
-use codex_opencode_adapter::conversion::{build_chat_payload, build_response, StreamAssembler};
-use codex_opencode_adapter::state::StoredResponse;
+use codex_mimo_adapter::conversion::{build_chat_payload, build_response, StreamAssembler};
+use codex_mimo_adapter::state::StoredResponse;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
@@ -13,7 +13,7 @@ fn tagged_content(reasoning: &str, answer: &str) -> String {
 #[test]
 fn nonstream_leading_reasoning_block_becomes_reasoning_item() {
     let body = json!({
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": "answer with reasoning",
         "stream": false
     });
@@ -35,7 +35,7 @@ fn nonstream_leading_reasoning_block_becomes_reasoning_item() {
     let response = build_response(
         &body,
         &upstream,
-        "opencode-go/test-model",
+        "mimo/test-model",
         "test-model",
         &messages,
         &tool_ctx,
@@ -75,7 +75,7 @@ fn nonstream_leading_reasoning_block_becomes_reasoning_item() {
 #[test]
 fn stream_leading_reasoning_block_is_not_emitted_as_output_text() {
     let body = json!({
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": "answer with reasoning",
         "stream": true
     });
@@ -87,7 +87,7 @@ fn stream_leading_reasoning_block_is_not_emitted_as_output_text() {
     let stored_for_put = Arc::clone(&stored);
     let mut assembler = StreamAssembler::new(
         body,
-        "opencode-go/test-model".to_string(),
+        "mimo/test-model".to_string(),
         "test-model".to_string(),
         messages,
         tool_ctx,

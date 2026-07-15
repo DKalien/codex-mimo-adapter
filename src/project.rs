@@ -7,10 +7,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const PROJECT_ENV_FILENAME: &str = ".codex-opencode-adapter.env";
+pub const PROJECT_ENV_FILENAME: &str = ".codex-mimo-adapter.env";
 const REGISTRY_FILENAME: &str = "project-registry.toml";
 const ADAPTER_TOKEN_SUBJECT: &str = "adapter";
-const PROJECT_ID_PREFIX: &str = "opencode_adapter_";
+const PROJECT_ID_PREFIX: &str = "mimo_adapter_";
 
 /// Generate a deterministic short hex hash from an input string.
 pub fn hex_hash(input: &str) -> String {
@@ -56,11 +56,11 @@ fn sign_subject(subject: &str, secret: &str) -> String {
         .take(16)
         .map(|b| format!("{b:02x}"))
         .collect();
-    format!("codex-opencode-{subject}-{hmac_hex}")
+    format!("codex-mimo-{subject}-{hmac_hex}")
 }
 
 /// Sign an adapter-scoped bearer token using HMAC-SHA256.
-/// Token format: codex-opencode-adapter-<hex_hmac>
+/// Token format: codex-mimo-adapter-<hex_hmac>
 pub fn sign_adapter_token(secret: &str) -> String {
     sign_subject(ADAPTER_TOKEN_SUBJECT, secret)
 }
@@ -138,7 +138,7 @@ pub fn registry_dir_path() -> anyhow::Result<PathBuf> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .map_err(|_| anyhow::anyhow!("failed to resolve user home directory"))?;
-    Ok(PathBuf::from(home).join(".codex-opencode-adapter"))
+    Ok(PathBuf::from(home).join(".codex-mimo-adapter"))
 }
 
 // --------------------------------------------------------------------------
@@ -171,7 +171,7 @@ impl ProjectPaths {
         Self {
             env_file: root.join(PROJECT_ENV_FILENAME),
             agents_dir: root.join(".codex").join("agents"),
-            state_dir: root.join(".codex-opencode"),
+            state_dir: root.join(".codex-mimo"),
             root,
         }
     }
@@ -286,8 +286,8 @@ fn find_cwd_in_session_file(path: &Path) -> Option<PathBuf> {
 
 /// Resolve the current project using a multi-priority strategy:
 ///
-/// 1. **`CODEX_OPENCODE_PROJECT_ID` env var** — explicit registry lookup.
-/// 2. **cwd / ancestor walk** — look for `.codex-opencode-adapter.env` upward.
+/// 1. **`CODEX_MIMO_PROJECT_ID` env var** — explicit registry lookup.
+/// 2. **cwd / ancestor walk** — look for `.codex-mimo-adapter.env` upward.
 /// 3. **Codex thread/session context** — recover cwd from process_manager or session files.
 /// 4. **Constrained fallback** — single registered project only.
 ///
@@ -296,8 +296,8 @@ pub fn resolve_project() -> anyhow::Result<ProjectPaths> {
     let reg_dir = registry_dir_path()?;
     let registry = ProjectRegistry::load(&reg_dir);
 
-    // Priority 1: Explicit CODEX_OPENCODE_PROJECT_ID
-    if let Ok(pid_value) = std::env::var("CODEX_OPENCODE_PROJECT_ID") {
+    // Priority 1: Explicit CODEX_MIMO_PROJECT_ID
+    if let Ok(pid_value) = std::env::var("CODEX_MIMO_PROJECT_ID") {
         let pid = pid_value.trim().to_string();
         if !pid.is_empty() {
             if let Some(root) = registry.resolve_root(&pid) {
@@ -307,8 +307,8 @@ pub fn resolve_project() -> anyhow::Result<ProjectPaths> {
             }
             return Err(anyhow!(
                 concat!(
-                "CODEX_OPENCODE_PROJECT_ID is set to \"{pid}\" but no matching project was found in the registry.\n",
-                " Run 'codex-opencode-adapter init' from the project root to register it."
+                "CODEX_MIMO_PROJECT_ID is set to \"{pid}\" but no matching project was found in the registry.\n",
+                " Run 'codex-mimo-adapter init' from the project root to register it."
             )
             ));
         }
@@ -344,8 +344,8 @@ pub fn resolve_project() -> anyhow::Result<ProjectPaths> {
     // Priority 4: Constrained fallback -- single registered project only
     if registry.projects.is_empty() {
         return Err(anyhow!(concat!(
-            "No OpenCode adapter projects found.\n",
-            " Run 'codex-opencode-adapter init' from your project root to create one."
+            "No MiMo adapter projects found.\n",
+            " Run 'codex-mimo-adapter init' from your project root to create one."
         )));
     }
     if registry.projects.len() == 1 {
@@ -361,9 +361,11 @@ pub fn resolve_project() -> anyhow::Result<ProjectPaths> {
     let project_ids: Vec<&str> = registry.projects.keys().map(|k| k.as_str()).collect();
     Err(anyhow!(
         concat!(
-        "Multiple OpenCode adapter projects are registered, but no project context was found.\n",
-        " Registered projects: {}\n", " To fix this, set CODEX_OPENCODE_PROJECT_ID=<project_id>, run from a project ", "directory, or start Codex from within an initialized project directory."
-    ),
+            "Multiple MiMo adapter projects are registered, but no project context was found.\n",
+            " Registered projects: {}\n",
+            " To fix this, set CODEX_MIMO_PROJECT_ID=<project_id>, run from a project ",
+            "directory, or start Codex from within an initialized project directory."
+        ),
         project_ids.join(", ")
     ))
 }
@@ -372,8 +374,8 @@ fn validate_recovered_project(paths: &ProjectPaths) -> anyhow::Result<()> {
     anyhow::ensure!(paths.env_file.exists(), "project has no env file");
     let project_env = read_project_env(&paths.env_file)?;
     let project_id = project_env
-        .get("CODEX_OPENCODE_PROJECT_ID")
-        .ok_or_else(|| anyhow!("CODEX_OPENCODE_PROJECT_ID is missing in project env"))?;
+        .get("CODEX_MIMO_PROJECT_ID")
+        .ok_or_else(|| anyhow!("CODEX_MIMO_PROJECT_ID is missing in project env"))?;
     let registry = ProjectRegistry::load(&registry_dir_path()?);
     let registered_root = registry
         .resolve_root(project_id)

@@ -1,16 +1,16 @@
 use std::sync::{Arc, Mutex};
 
-use codex_opencode_adapter::conversion::responses_to_chat::{
+use codex_mimo_adapter::conversion::responses_to_chat::{
     build_chat_payload, function_output_call_ids,
 };
-use codex_opencode_adapter::conversion::stream_chat_to_responses::StreamAssembler;
-use codex_opencode_adapter::conversion::tool_context::ToolContext;
+use codex_mimo_adapter::conversion::stream_chat_to_responses::StreamAssembler;
+use codex_mimo_adapter::conversion::tool_context::ToolContext;
 use serde_json::{json, Value};
 
 #[test]
 fn function_output_call_ids_reads_responses_call_id() {
     let body = json!({
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": [
             {"type": "function_call_output", "call_id": "call_123", "output": "ok"},
             {"type": "custom_tool_call_output", "call_id": "call_456", "output": "done"}
@@ -24,7 +24,7 @@ fn function_output_call_ids_reads_responses_call_id() {
 #[test]
 fn build_chat_payload_converts_custom_and_tool_search_calls() {
     let body = json!({
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "tools": [
             {"type": "custom", "name": "shell", "description": "run shell"},
             {"type": "tool_search"}
@@ -67,8 +67,8 @@ fn stream_truncated_with_output_can_finalize_as_incomplete() {
     let emitted_for_put = emitted.clone();
 
     let mut assembler = StreamAssembler::new(
-        json!({"model": "opencode-go/test-model", "stream": true}),
-        "opencode-go/test-model".to_string(),
+        json!({"model": "mimo/test-model", "stream": true}),
+        "mimo/test-model".to_string(),
         "test-model".to_string(),
         vec![],
         ToolContext::build(None),

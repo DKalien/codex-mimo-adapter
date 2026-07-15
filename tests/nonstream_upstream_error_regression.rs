@@ -3,10 +3,10 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::{Json, Router};
-use codex_opencode_adapter::config::Config;
-use codex_opencode_adapter::server::{self, AppState, ProjectRuntime};
-use codex_opencode_adapter::state::StateStore;
-use codex_opencode_adapter::upstream::OpenCodeGoClient;
+use codex_mimo_adapter::config::Config;
+use codex_mimo_adapter::server::{self, AppState, ProjectRuntime};
+use codex_mimo_adapter::state::StateStore;
+use codex_mimo_adapter::upstream::MimoClient;
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
@@ -27,7 +27,7 @@ async fn nonstream_upstream_http_error_returns_responses_failed_body() {
     let resp = adapter_client
         .post(format!("http://{adapter_addr}/v1/responses"))
         .json(&json!({
-            "model": "opencode_adapter/test_nons/opencode-go/deepseek-v4-flash",
+            "model": "mimo_adapter/test_nons/mimo/deepseek-v4-flash",
             "input": "Hello",
             "stream": false,
             "metadata": {"case": "nonstream-upstream-error"}
@@ -43,7 +43,7 @@ async fn nonstream_upstream_http_error_returns_responses_failed_body() {
     assert_eq!(body["status"], "failed");
     assert_eq!(
         body["model"],
-        "opencode_adapter/test_nons/opencode-go/deepseek-v4-flash"
+        "mimo_adapter/test_nons/mimo/deepseek-v4-flash"
     );
     assert_eq!(body["metadata"]["case"], "nonstream-upstream-error");
     assert!(body["output"].as_array().unwrap().is_empty());
@@ -100,9 +100,9 @@ async fn start_adapter(upstream_addr: SocketAddr) -> (SocketAddr, String, reqwes
         "nonstream_upstream_error_{}.sqlite",
         Uuid::new_v4()
     ));
-    let project_id = "opencode_adapter_test_nons".to_string();
+    let project_id = "mimo_adapter_test_nons".to_string();
     let raw_token = format!("codex-nons-raw-{}", Uuid::new_v4().simple());
-    let signed_token = codex_opencode_adapter::project::sign_adapter_token(&raw_token);
+    let signed_token = codex_mimo_adapter::project::sign_adapter_token(&raw_token);
     let config = Config {
         host: "127.0.0.1".to_string(),
         port: 0,
@@ -115,7 +115,7 @@ async fn start_adapter(upstream_addr: SocketAddr) -> (SocketAddr, String, reqwes
         max_request_bytes: 8 * 1024 * 1024,
         max_concurrency: 10,
     };
-    let inner_client = OpenCodeGoClient::new(
+    let inner_client = MimoClient::new(
         &config.upstream_base,
         &config.upstream_key,
         config.timeout_seconds,

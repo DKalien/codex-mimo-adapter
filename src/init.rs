@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 use uuid::Uuid;
 
-const USER_DIR_NAME: &str = ".codex-opencode-adapter";
+const USER_DIR_NAME: &str = ".codex-mimo-adapter";
 const INIT_LOG_FILE: &str = "init.log";
 
 const OSS_FLASH_TEMPLATE: &str = include_str!("../resources/templates/oss-flash.toml");
@@ -29,22 +29,22 @@ pub fn run_init(args: InitArgs) -> anyhow::Result<()> {
 
     let api_key = match args.api_key {
         Some(value) if !value.trim().is_empty() => value,
-        _ => prompt("OpenCode Go API key")?,
+        _ => prompt("MiMo API key")?,
     };
-    let local_token = format!("codex-opencode-{}", Uuid::new_v4().simple());
+    let local_token = format!("codex-mimo-{}", Uuid::new_v4().simple());
 
     let env_contents = format!(
-        "OPENCODE_GO_API_KEY={api_key}\n\
-         CODEX_OPENCODE_LOCAL_TOKEN={local_token}\n\
-         CODEX_OPENCODE_PROJECT_ID={project_id}\n\
-         CODEX_OPENCODE_HOST={host}\n\
-         CODEX_OPENCODE_PORT={port}\n\
-         OPENCODE_GO_BASE_URL={upstream_base}\n\
-         CODEX_OPENCODE_STATE_DB={state_db}\n\
-         CODEX_OPENCODE_STATE_TTL_SECONDS={ttl}\n\
-         CODEX_OPENCODE_TIMEOUT_SECONDS={timeout}\n\
-         CODEX_OPENCODE_MAX_REQUEST_BYTES={max_request_bytes}\n\
-         CODEX_OPENCODE_MAX_CONCURRENCY={max_concurrency}\n",
+        "MIMO_API_KEY={api_key}\n\
+         CODEX_MIMO_LOCAL_TOKEN={local_token}\n\
+         CODEX_MIMO_PROJECT_ID={project_id}\n\
+         CODEX_MIMO_HOST={host}\n\
+         CODEX_MIMO_PORT={port}\n\
+         MIMO_API_BASE_URL={upstream_base}\n\
+         CODEX_MIMO_STATE_DB={state_db}\n\
+         CODEX_MIMO_STATE_TTL_SECONDS={ttl}\n\
+         CODEX_MIMO_TIMEOUT_SECONDS={timeout}\n\
+         CODEX_MIMO_MAX_REQUEST_BYTES={max_request_bytes}\n\
+         CODEX_MIMO_MAX_CONCURRENCY={max_concurrency}\n",
         host = args.host,
         port = args.port,
         upstream_base = args.upstream_base,
@@ -67,7 +67,7 @@ pub fn run_init(args: InitArgs) -> anyhow::Result<()> {
     registry.save(&user_dir()?)?;
     logger.log(&format!("registered project {project_id}"))?;
 
-    // Agent templates always use the fixed opencode_go_adapter provider name,
+    // Agent templates always use the fixed mimo_adapter provider name,
     // while model carries the project route consumed by the adapter.
     let project_key = project_key_from_id(&project_id);
     let writes = vec![
@@ -99,7 +99,7 @@ pub fn run_init(args: InitArgs) -> anyhow::Result<()> {
     fs::create_dir_all(&project.state_dir)
         .with_context(|| format!("failed to create {}", project.state_dir.display()))?;
     logger.log("init completed successfully")?;
-    println!("Initialization complete. Next: codex-opencode-adapter run");
+    println!("Initialization complete. Next: codex-mimo-adapter run");
     Ok(())
 }
 
@@ -124,10 +124,10 @@ fn route_agent_template(template: &str, project_key: &str) -> anyhow::Result<Str
         .and_then(Item::as_str)
         .ok_or_else(|| anyhow!("agent template is missing model"))?;
     anyhow::ensure!(
-        model.starts_with("opencode-go/"),
-        "agent template model must use the opencode-go/ prefix"
+        model.starts_with("mimo/"),
+        "agent template model must use the mimo/ prefix"
     );
-    document["model"] = value(format!("opencode_adapter/{project_key}/{model}"));
+    document["model"] = value(format!("mimo_adapter/{project_key}/{model}"));
     Ok(document.to_string())
 }
 
@@ -160,8 +160,8 @@ fn build_global_codex_config(path: &Path, port: u16) -> anyhow::Result<String> {
     };
 
     let providers = ensure_table(&mut document, "model_providers")?;
-    let provider = ensure_subtable(providers, "opencode_go_adapter")?;
-    provider["name"] = value("OpenCode Go Adapter");
+    let provider = ensure_subtable(providers, "mimo_adapter")?;
+    provider["name"] = value("MiMo API Adapter");
     provider["base_url"] = value(format!("http://{}:{}/v1", DEFAULT_HOST, port));
     provider["wire_api"] = value("responses");
     provider["request_max_retries"] = value(0);
@@ -169,7 +169,7 @@ fn build_global_codex_config(path: &Path, port: u16) -> anyhow::Result<String> {
     provider["stream_idle_timeout_ms"] = value(120000);
 
     let auth = ensure_subtable(provider, "auth")?;
-    auth["command"] = value("codex-opencode-adapter");
+    auth["command"] = value("codex-mimo-adapter");
     let mut args = Array::default();
     args.push("auth");
     args.push("print-local-token");

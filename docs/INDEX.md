@@ -1,11 +1,11 @@
-﻿# Documentation index
+# Documentation index
 
 Docs are grouped by purpose.
 
 | File | Purpose |
 |---|---|
 | [USAGE.zh-CN.md](USAGE.zh-CN.md) | Daily Chinese setup, usage, and troubleshooting guide. |
-| [VALIDATION.zh-CN.md](VALIDATION.zh-CN.md) | Real OpenCode Go and Codex validation checklist. |
+| [VALIDATION.zh-CN.md](VALIDATION.zh-CN.md) | Real MiMo Token Plan and Codex validation checklist. |
 | [DIAGNOSTICS.md](DIAGNOSTICS.md) | Runtime diagnostics and log interpretation. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Compatibility scope, references, implementation mapping, and non-goals. |
 | [ROADMAP.md](ROADMAP.md) | Current status, known gaps, and future validation plan. |

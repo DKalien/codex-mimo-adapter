@@ -14,18 +14,17 @@ fn init_writes_project_files_and_auth_prints_local_token() {
     let output = sandbox.run(["init", "--api-key", "test-api-key"]);
     assert_success(&output);
 
-    let env_text =
-        fs::read_to_string(sandbox.project().join(".codex-opencode-adapter.env")).unwrap();
-    assert!(env_text.contains("OPENCODE_GO_API_KEY=test-api-key"));
-    assert!(env_text.contains("CODEX_OPENCODE_PROJECT_ID=opencode_adapter_"));
-    assert!(env_text.contains("CODEX_OPENCODE_STATE_DB=.codex-opencode/state.sqlite"));
+    let env_text = fs::read_to_string(sandbox.project().join(".codex-mimo-adapter.env")).unwrap();
+    assert!(env_text.contains("MIMO_API_KEY=test-api-key"));
+    assert!(env_text.contains("CODEX_MIMO_PROJECT_ID=mimo_adapter_"));
+    assert!(env_text.contains("CODEX_MIMO_STATE_DB=.codex-mimo/state.sqlite"));
 
     let token = env_text
         .lines()
-        .find_map(|line| line.strip_prefix("CODEX_OPENCODE_LOCAL_TOKEN="))
+        .find_map(|line| line.strip_prefix("CODEX_MIMO_LOCAL_TOKEN="))
         .unwrap()
         .to_string();
-    assert!(token.starts_with("codex-opencode-"));
+    assert!(token.starts_with("codex-mimo-"));
 
     for name in [
         "oss-flash.toml",
@@ -45,15 +44,15 @@ fn init_writes_project_files_and_auth_prints_local_token() {
     }
 
     let config = fs::read_to_string(sandbox.home().join(".codex").join("config.toml")).unwrap();
-    assert!(config.contains("[model_providers.opencode_go_adapter]"));
-    assert!(config.contains("command = \"codex-opencode-adapter\""));
+    assert!(config.contains("[model_providers.mimo_adapter]"));
+    assert!(config.contains("command = \"codex-mimo-adapter\""));
     assert!(config.contains("args = [\"auth\", \"print-local-token\"]"));
 
     let auth_output = sandbox.run(["auth", "print-local-token"]);
     assert_success(&auth_output);
     let signed_token = stdout(&auth_output).trim().to_string();
     assert!(
-        signed_token.starts_with("codex-opencode-"),
+        signed_token.starts_with("codex-mimo-"),
         "token must be signed: {signed_token}"
     );
     assert_ne!(
@@ -87,12 +86,12 @@ keep = true
 [model_providers.other]
 name = "Other"
 
-[model_providers.opencode_go_adapter]
+[model_providers.mimo_adapter]
 name = "Old"
 base_url = "http://127.0.0.1:9999/v1"
 wire_api = "responses"
 
-[model_providers.opencode_go_adapter.auth]
+[model_providers.mimo_adapter.auth]
 command = "cmd.exe"
 args = ["/d", "/s", "/c", "echo old"]
 timeout_ms = 5000
@@ -107,8 +106,8 @@ timeout_ms = 5000
     assert!(updated.contains("keep = true"));
     assert!(updated.contains("[model_providers.other]"));
     assert!(updated.contains("name = \"Other\""));
-    assert!(updated.contains("name = \"OpenCode Go Adapter\""));
-    assert!(updated.contains("command = \"codex-opencode-adapter\""));
+    assert!(updated.contains("name = \"MiMo API Adapter\""));
+    assert!(updated.contains("command = \"codex-mimo-adapter\""));
     assert!(!updated.contains("echo old"));
 
     let backups = fs::read_dir(&config_dir)
@@ -131,11 +130,11 @@ fn init_from_subdirectory_writes_only_current_dir() {
     assert_success(&output);
 
     assert!(
-        !parent.join(".codex-opencode-adapter.env").exists(),
+        !parent.join(".codex-mimo-adapter.env").exists(),
         "init from child must not write parent project env"
     );
     assert!(
-        child.join(".codex-opencode-adapter.env").exists(),
+        child.join(".codex-mimo-adapter.env").exists(),
         "init from child must write child project env"
     );
 }
@@ -155,15 +154,9 @@ fn init_rolls_back_when_agent_write_fails() {
     assert!(!output.status.success(), "init should have failed");
     assert!(stderr(&output).contains("failed to create"));
     assert_eq!(fs::read_to_string(&config_path).unwrap(), original);
-    assert!(!sandbox
-        .project()
-        .join(".codex-opencode-adapter.env")
-        .exists());
+    assert!(!sandbox.project().join(".codex-mimo-adapter.env").exists());
 
-    let log_path = sandbox
-        .home()
-        .join(".codex-opencode-adapter")
-        .join("init.log");
+    let log_path = sandbox.home().join(".codex-mimo-adapter").join("init.log");
     let log_text = fs::read_to_string(log_path).unwrap();
     assert!(log_text.contains("write failed, starting rollback"));
 }
@@ -176,7 +169,7 @@ fn auth_run_and_start_require_init() {
     let output = sandbox.run(vec!["auth", "print-local-token"]);
     assert!(!output.status.success());
     assert!(
-        stderr(&output).contains("CODEX_OPENCODE_LOCAL_TOKEN is missing"),
+        stderr(&output).contains("CODEX_MIMO_LOCAL_TOKEN is missing"),
         "auth stderr was: {}",
         stderr(&output)
     );
@@ -220,16 +213,16 @@ fn auth_rejects_recovered_project_when_registry_mismatches_env() {
     let init_output = sandbox.run(["init", "--api-key", "test-api-key"]);
     assert_success(&init_output);
 
-    let env_path = sandbox.project().join(".codex-opencode-adapter.env");
+    let env_path = sandbox.project().join(".codex-mimo-adapter.env");
     let mut env_text = fs::read_to_string(&env_path).unwrap();
     let original_project_id = env_text
         .lines()
-        .find_map(|line| line.strip_prefix("CODEX_OPENCODE_PROJECT_ID="))
+        .find_map(|line| line.strip_prefix("CODEX_MIMO_PROJECT_ID="))
         .unwrap()
         .to_string();
     env_text = env_text.replace(
-        &format!("CODEX_OPENCODE_PROJECT_ID={original_project_id}"),
-        "CODEX_OPENCODE_PROJECT_ID=opencode_adapter_wrongid",
+        &format!("CODEX_MIMO_PROJECT_ID={original_project_id}"),
+        "CODEX_MIMO_PROJECT_ID=mimo_adapter_wrongid",
     );
     fs::write(&env_path, env_text).unwrap();
 
@@ -242,7 +235,7 @@ fn auth_rejects_recovered_project_when_registry_mismatches_env() {
     assert_success(&direct);
     let direct_token = stdout(&direct).trim().to_string();
     assert!(
-        direct_token.starts_with("codex-opencode-"),
+        direct_token.starts_with("codex-mimo-"),
         "token should be a valid adapter token"
     );
 }
@@ -265,10 +258,10 @@ fn check_without_project_context_shows_connectivity_error() {
         !stderr_text.contains("Project is not initialized"),
         "must not mention project init: {stderr_text}"
     );
-    // The warning prints the original config error, so "No OpenCode" is
+    // The warning prints the original config error, so "No MiMo" is
     // expected in stderr.  It must NOT appear in stdout though.
     assert!(
-        !stdout_text.contains("No OpenCode"),
+        !stdout_text.contains("No MiMo"),
         "must not mention 'no projects' in stdout: {stdout_text}"
     );
     // Verify the warning is present so the user knows why.
@@ -305,21 +298,20 @@ fn check_uses_project_env_and_succeeds() {
 
     // Register project in registry, then override env with mock upstream
     assert_success(&sandbox.run(["init", "--api-key", "test-api-key"]));
-    let init_env =
-        fs::read_to_string(sandbox.project().join(".codex-opencode-adapter.env")).unwrap();
+    let init_env = fs::read_to_string(sandbox.project().join(".codex-mimo-adapter.env")).unwrap();
     let proj_id = init_env
         .lines()
-        .find_map(|l| l.strip_prefix("CODEX_OPENCODE_PROJECT_ID="))
+        .find_map(|l| l.strip_prefix("CODEX_MIMO_PROJECT_ID="))
         .unwrap();
     let init_token = init_env
         .lines()
-        .find_map(|l| l.strip_prefix("CODEX_OPENCODE_LOCAL_TOKEN="))
+        .find_map(|l| l.strip_prefix("CODEX_MIMO_LOCAL_TOKEN="))
         .unwrap();
 
     fs::write(
-        sandbox.project().join(".codex-opencode-adapter.env"),
+        sandbox.project().join(".codex-mimo-adapter.env"),
         format!(
-            "OPENCODE_GO_API_KEY=test-api-key\nCODEX_OPENCODE_LOCAL_TOKEN={init_token}\nCODEX_OPENCODE_PROJECT_ID={proj_id}\nCODEX_OPENCODE_HOST=127.0.0.1\nCODEX_OPENCODE_PORT={port}\n",
+            "MIMO_API_KEY=test-api-key\nCODEX_MIMO_LOCAL_TOKEN={init_token}\nCODEX_MIMO_PROJECT_ID={proj_id}\nCODEX_MIMO_HOST=127.0.0.1\nCODEX_MIMO_PORT={port}\n",
             port = addr.port()
         ),
     )
@@ -341,59 +333,59 @@ fn dual_project_isolation() {
     fs::create_dir_all(&proj_a).unwrap();
     let out_a = sandbox.run_in(&proj_a, ["init", "--api-key", "key-a"]);
     assert_success(&out_a);
-    let env_a = fs::read_to_string(proj_a.join(".codex-opencode-adapter.env")).unwrap();
+    let env_a = fs::read_to_string(proj_a.join(".codex-mimo-adapter.env")).unwrap();
     let pid_a = env_a
         .lines()
-        .find_map(|l| l.strip_prefix("CODEX_OPENCODE_PROJECT_ID="))
+        .find_map(|l| l.strip_prefix("CODEX_MIMO_PROJECT_ID="))
         .unwrap()
         .to_string();
     let token_a = env_a
         .lines()
-        .find_map(|l| l.strip_prefix("CODEX_OPENCODE_LOCAL_TOKEN="))
+        .find_map(|l| l.strip_prefix("CODEX_MIMO_LOCAL_TOKEN="))
         .unwrap()
         .to_string();
-    assert!(pid_a.starts_with("opencode_adapter_"));
+    assert!(pid_a.starts_with("mimo_adapter_"));
 
     // Project B
     let proj_b = sandbox.root().join("proj_b");
     fs::create_dir_all(&proj_b).unwrap();
     let out_b = sandbox.run_in(&proj_b, ["init", "--api-key", "key-b"]);
     assert_success(&out_b);
-    let env_b = fs::read_to_string(proj_b.join(".codex-opencode-adapter.env")).unwrap();
+    let env_b = fs::read_to_string(proj_b.join(".codex-mimo-adapter.env")).unwrap();
     let pid_b = env_b
         .lines()
-        .find_map(|l| l.strip_prefix("CODEX_OPENCODE_PROJECT_ID="))
+        .find_map(|l| l.strip_prefix("CODEX_MIMO_PROJECT_ID="))
         .unwrap()
         .to_string();
     let token_b = env_b
         .lines()
-        .find_map(|l| l.strip_prefix("CODEX_OPENCODE_LOCAL_TOKEN="))
+        .find_map(|l| l.strip_prefix("CODEX_MIMO_LOCAL_TOKEN="))
         .unwrap()
         .to_string();
 
     assert_ne!(pid_a, pid_b, "each project must get unique project_id");
     assert_ne!(token_a, token_b, "each project must get unique local_token");
 
-    // Agent templates reference opencode_go_adapter (not project-specific)
+    // Agent templates reference mimo_adapter (not project-specific)
     for proj in [&proj_a, &proj_b] {
         for name in ["oss-flash.toml", "oss-pro.toml"] {
             let text = fs::read_to_string(proj.join(".codex").join("agents").join(name)).unwrap();
             assert!(
-                text.contains("model_provider = \"opencode_go_adapter\""),
+                text.contains("model_provider = \"mimo_adapter\""),
                 "{}/agents/{name} must use fixed provider",
                 proj.display()
             );
         }
     }
 
-    // Global config has single opencode_go_adapter (not project-specific)
+    // Global config has single mimo_adapter (not project-specific)
     let config = fs::read_to_string(sandbox.home().join(".codex").join("config.toml")).unwrap();
     assert!(
-        config.contains("[model_providers.opencode_go_adapter]"),
-        "config must contain opencode_go_adapter"
+        config.contains("[model_providers.mimo_adapter]"),
+        "config must contain mimo_adapter"
     );
     assert!(
-        !config.contains("model_providers.opencode_adapter_"),
+        !config.contains("model_providers.mimo_adapter_"),
         "config should not contain project-specific provider names"
     );
 
@@ -401,12 +393,12 @@ fn dual_project_isolation() {
     let auth_a = sandbox.run_in(&proj_a, ["auth", "print-local-token"]);
     assert_success(&auth_a);
     let signed_a = stdout(&auth_a).trim().to_string();
-    assert!(signed_a.starts_with("codex-opencode-"));
+    assert!(signed_a.starts_with("codex-mimo-"));
 
     let auth_b = sandbox.run_in(&proj_b, ["auth", "print-local-token"]);
     assert_success(&auth_b);
     let signed_b = stdout(&auth_b).trim().to_string();
-    assert!(signed_b.starts_with("codex-opencode-"));
+    assert!(signed_b.starts_with("codex-mimo-"));
 
     assert_ne!(
         signed_a, signed_b,
@@ -435,7 +427,7 @@ fn dual_project_external_auth_must_not_silently_succeed() {
     assert_success(&output);
     let token = stdout(&output).trim().to_string();
     assert!(
-        token.starts_with("codex-opencode-"),
+        token.starts_with("codex-mimo-"),
         "token should be a valid adapter token"
     );
 }
@@ -460,13 +452,13 @@ fn dual_project_external_auth_can_use_registered_adapter_token() {
     assert_success(&output);
     let token = stdout(&output).trim().to_string();
     assert!(
-        token.starts_with("codex-opencode-"),
+        token.starts_with("codex-mimo-"),
         "token should be a valid adapter token"
     );
 }
 
 // ---------------------------------------------------------------------------
-// Req 3, path 1: CODEX_OPENCODE_PROJECT_ID env var recovery
+// Req 3, path 1: CODEX_MIMO_PROJECT_ID env var recovery
 #[test]
 fn auth_recovery_via_env_var_project_id() {
     let sandbox = TestSandbox::new("auth-env-recovery-req3");
@@ -474,11 +466,10 @@ fn auth_recovery_via_env_var_project_id() {
     let direct = sandbox.run(["auth", "print-local-token"]);
     assert_success(&direct);
     let direct_token = stdout(&direct).trim().to_string();
-    let env_text =
-        fs::read_to_string(sandbox.project().join(".codex-opencode-adapter.env")).unwrap();
+    let env_text = fs::read_to_string(sandbox.project().join(".codex-mimo-adapter.env")).unwrap();
     let project_id = env_text
         .lines()
-        .find_map(|line| line.strip_prefix("CODEX_OPENCODE_PROJECT_ID="))
+        .find_map(|line| line.strip_prefix("CODEX_MIMO_PROJECT_ID="))
         .unwrap()
         .to_string();
     let external_dir = sandbox.root().join("external");
@@ -486,7 +477,7 @@ fn auth_recovery_via_env_var_project_id() {
     let recovered = sandbox.run_in_with_env(
         &external_dir,
         ["auth", "print-local-token"],
-        [("CODEX_OPENCODE_PROJECT_ID", &project_id)],
+        [("CODEX_MIMO_PROJECT_ID", &project_id)],
     );
     assert_success(&recovered);
     assert_eq!(stdout(&recovered).trim(), direct_token);
@@ -521,7 +512,7 @@ async fn models_handler(
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
     let raw_expected = format!("Bearer {}", expected_token.as_str());
-    let accept = auth == raw_expected || auth.starts_with("Bearer codex-opencode-");
+    let accept = auth == raw_expected || auth.starts_with("Bearer codex-mimo-");
     if !accept {
         return (
             StatusCode::UNAUTHORIZED,
@@ -532,7 +523,7 @@ async fn models_handler(
         StatusCode::OK,
         Json(json!({
             "data": [
-                { "id": "opencode-go/deepseek-v4-flash" }
+                { "id": "mimo/deepseek-v4-flash" }
             ]
         })),
     )
@@ -547,7 +538,7 @@ struct TestSandbox {
 impl TestSandbox {
     fn new(label: &str) -> Self {
         let root =
-            std::env::temp_dir().join(format!("codex-opencode-adapter-{label}-{}", Uuid::new_v4()));
+            std::env::temp_dir().join(format!("codex-mimo-adapter-{label}-{}", Uuid::new_v4()));
         let project = root.join("project");
         let home = root.join("home");
         fs::create_dir_all(&project).unwrap();
@@ -639,7 +630,7 @@ impl Drop for TestSandbox {
 }
 
 fn binary_path() -> &'static str {
-    env!("CARGO_BIN_EXE_codex-opencode-adapter")
+    env!("CARGO_BIN_EXE_codex-mimo-adapter")
 }
 
 fn assert_success(output: &Output) {

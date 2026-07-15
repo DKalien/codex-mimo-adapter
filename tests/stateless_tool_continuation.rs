@@ -1,11 +1,11 @@
-use codex_opencode_adapter::conversion::{build_chat_payload, function_output_call_ids};
-use codex_opencode_adapter::state::StoredResponse;
+use codex_mimo_adapter::conversion::{build_chat_payload, function_output_call_ids};
+use codex_mimo_adapter::state::StoredResponse;
 use serde_json::{json, Value};
 
 #[test]
 fn stateless_full_history_tool_output_builds_chat_payload() {
     let body = json!({
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": [
             {"type":"message","role":"user","content":"call a tool"},
             {"type":"function_call","call_id":"call_1","name":"run","arguments":"{\"cmd\":\"echo ok\"}"},
@@ -37,7 +37,7 @@ fn stateless_full_history_tool_output_builds_chat_payload() {
 #[test]
 fn stateless_orphan_tool_output_still_fails_without_state() {
     let body = json!({
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": [
             {"type":"function_call_output","call_id":"call_1","output":"ok"}
         ]
@@ -57,7 +57,7 @@ fn stateless_orphan_tool_output_still_fails_without_state() {
 #[test]
 fn stateless_duplicate_tool_outputs_are_rejected_by_repair() {
     let body = json!({
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": [
             {"type":"function_call","call_id":"call_1","name":"run","arguments":"{}"},
             {"type":"function_call_output","call_id":"call_1","output":"one"},
@@ -77,7 +77,7 @@ fn stateless_duplicate_tool_outputs_are_rejected_by_repair() {
 fn previous_response_id_does_not_bypass_state_lookup_even_with_full_history() {
     let body = json!({
         "previous_response_id": "resp_prev",
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": [
             {"type":"function_call","call_id":"call_1","name":"run","arguments":"{}"},
             {"type":"function_call_output","call_id":"call_1","output":"ok"}
@@ -94,7 +94,7 @@ fn previous_response_id_does_not_bypass_state_lookup_even_with_full_history() {
 fn previous_response_full_history_does_not_duplicate_replayed_tool_call() {
     let previous = StoredResponse {
         response_id: "resp_prev".to_string(),
-        model_alias: "opencode-go/test-model".to_string(),
+        model_alias: "mimo/test-model".to_string(),
         model_upstream: "test-model".to_string(),
         messages: vec![
             json!({"role":"user","content":"call a tool"}),
@@ -116,7 +116,7 @@ fn previous_response_full_history_does_not_duplicate_replayed_tool_call() {
 
     let body = json!({
         "previous_response_id": "resp_prev",
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": [
             {"type":"message","role":"user","content":"call a tool"},
             {"type":"function_call","call_id":"call_1","name":"run","arguments":"{}"},

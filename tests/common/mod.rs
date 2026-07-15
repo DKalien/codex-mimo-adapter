@@ -2,11 +2,11 @@
 
 pub mod mock_upstream;
 
-use codex_opencode_adapter::config::{Config, ConfigOverrides};
-use codex_opencode_adapter::project::sign_adapter_token;
-use codex_opencode_adapter::server::{self, AppState, ProjectRuntime};
-use codex_opencode_adapter::state::StateStore;
-use codex_opencode_adapter::upstream::OpenCodeGoClient;
+use codex_mimo_adapter::config::{Config, ConfigOverrides};
+use codex_mimo_adapter::project::sign_adapter_token;
+use codex_mimo_adapter::server::{self, AppState, ProjectRuntime};
+use codex_mimo_adapter::state::StateStore;
+use codex_mimo_adapter::upstream::MimoClient;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -21,11 +21,11 @@ pub struct TestAdapter {
     pub client: reqwest::Client,
 }
 
-pub const TEST_PROJECT_ID: &str = "opencode_adapter_test_project";
+pub const TEST_PROJECT_ID: &str = "mimo_adapter_test_project";
 pub const TEST_PROJECT_KEY: &str = "test_project";
 
 pub fn routed_model(real_model: &str) -> String {
-    format!("opencode_adapter/{TEST_PROJECT_KEY}/{real_model}")
+    format!("mimo_adapter/{TEST_PROJECT_KEY}/{real_model}")
 }
 
 pub async fn start_adapter(upstream_addr: SocketAddr, local_token: Option<String>) -> TestAdapter {
@@ -52,7 +52,7 @@ pub async fn start_adapter(upstream_addr: SocketAddr, local_token: Option<String
         max_concurrency: 10,
     };
 
-    let inner_client = OpenCodeGoClient::new(
+    let inner_client = MimoClient::new(
         &config.upstream_base,
         &config.upstream_key,
         config.timeout_seconds,
@@ -125,22 +125,22 @@ pub struct RealSmokeConfig {
 
 impl RealSmokeConfig {
     pub fn from_env() -> Option<Self> {
-        let upstream_key = match std::env::var("OPENCODE_GO_API_KEY") {
+        let upstream_key = match std::env::var("MIMO_API_KEY") {
             Ok(key) if !key.is_empty() => key,
             _ => {
-                eprintln!("SKIP: OPENCODE_GO_API_KEY not set");
+                eprintln!("SKIP: MIMO_API_KEY not set");
                 return None;
             }
         };
 
         Some(Self {
-            upstream_base: std::env::var("OPENCODE_GO_BASE_URL")
-                .unwrap_or_else(|_| "https://opencode.ai/zen/go/v1".to_string()),
+            upstream_base: std::env::var("MIMO_API_BASE_URL")
+                .unwrap_or_else(|_| "https://token-plan-cn.xiaomimimo.com/v1".to_string()),
             upstream_key,
-            text_model: std::env::var("OPENCODE_GO_REAL_TEXT_MODEL")
-                .unwrap_or_else(|_| "opencode-go/deepseek-v4-flash".to_string()),
-            vision_model: std::env::var("OPENCODE_GO_REAL_VISION_MODEL")
-                .unwrap_or_else(|_| "opencode-go/mimo-v2.5".to_string()),
+            text_model: std::env::var("MIMO_API_REAL_TEXT_MODEL")
+                .unwrap_or_else(|_| "mimo/deepseek-v4-flash".to_string()),
+            vision_model: std::env::var("MIMO_API_REAL_VISION_MODEL")
+                .unwrap_or_else(|_| "mimo/mimo-v2.5".to_string()),
         })
     }
 }
@@ -163,7 +163,7 @@ pub async fn start_real_adapter(config: &RealSmokeConfig) -> SocketAddr {
         max_concurrency: 4,
     };
 
-    let client = OpenCodeGoClient::new(
+    let client = MimoClient::new(
         &adapter_config.upstream_base,
         &adapter_config.upstream_key,
         adapter_config.timeout_seconds,
@@ -339,7 +339,7 @@ pub async fn start_multi_project_adapter(
             max_concurrency,
         };
 
-        let client = OpenCodeGoClient::new(
+        let client = MimoClient::new(
             &config.upstream_base,
             &config.upstream_key,
             config.timeout_seconds,
@@ -348,7 +348,7 @@ pub async fn start_multi_project_adapter(
         let state = StateStore::new(&config.state_db, config.state_ttl_seconds).unwrap();
 
         projects.insert(
-            format!("opencode_adapter_{}", cfg.project_id),
+            format!("mimo_adapter_{}", cfg.project_id),
             ProjectRuntime {
                 config,
                 client,

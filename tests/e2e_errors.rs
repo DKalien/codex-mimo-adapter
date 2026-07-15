@@ -18,7 +18,7 @@ async fn test_e2e_upstream_http_error() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "model": routed_model("mimo/deepseek-v4-flash"),
             "input": "Hello",
             "stream": false
         }))
@@ -53,7 +53,7 @@ async fn test_e2e_upstream_stream_error() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "model": routed_model("mimo/deepseek-v4-flash"),
             "input": "Hello",
             "stream": true
         }))
@@ -100,7 +100,7 @@ async fn test_e2e_stream_rate_limit_error() {
         .post(adapter_url(addr, "/v1/responses"))
         .bearer_auth(token)
         .json(&json!({
-            "model": "opencode_adapter/test-proj/opencode-go/test-model",
+            "model": "mimo_adapter/test-proj/mimo/test-model",
             "input": "Hello",
             "stream": true
         }))
@@ -141,7 +141,7 @@ async fn test_e2e_stream_early_history_error_event_order() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "model": routed_model("mimo/deepseek-v4-flash"),
             "input": [{"type":"function_call_output","call_id":"call_missing","output":"ok"}],
             "stream": true,
             "previous_response_id": "resp_never_stored"
@@ -150,7 +150,11 @@ async fn test_e2e_stream_early_history_error_event_order() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 200, "stream returns 200 even on early failure");
+    assert_eq!(
+        resp.status(),
+        200,
+        "stream returns 200 even on early failure"
+    );
     let body_text = resp.text().await.unwrap();
 
     // Parse SSE events manually to check ordering including [DONE].
@@ -176,7 +180,12 @@ async fn test_e2e_stream_early_history_error_event_order() {
 
     assert_eq!(
         event_names,
-        vec!["response.created".to_string(), "response.in_progress".to_string(), "response.failed".to_string(), "[DONE]".to_string()],
+        vec![
+            "response.created".to_string(),
+            "response.in_progress".to_string(),
+            "response.failed".to_string(),
+            "[DONE]".to_string()
+        ],
         "early stream failure must emit created -> in_progress -> failed -> [DONE]"
     );
 
@@ -197,7 +206,10 @@ async fn test_e2e_stream_early_history_error_event_order() {
             assert_eq!(r["status"], "failed");
             assert_eq!(r["error"]["type"], "invalid_tool_history");
             assert_eq!(r["error"]["code"], "invalid_tool_history");
-            assert!(r["error"]["message"].as_str().unwrap().contains("resp_never_stored"));
+            assert!(r["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("resp_never_stored"));
             assert!(r["id"].as_str().unwrap().starts_with("resp_"));
             break;
         }

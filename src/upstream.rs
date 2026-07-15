@@ -8,22 +8,22 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum UpstreamError {
-    #[error("OpenCode Go HTTP {status}: {message}")]
+    #[error("MiMo API HTTP {status}: {message}")]
     Http { status: u16, message: String },
-    #[error("OpenCode Go network error: {0}")]
+    #[error("MiMo API network error: {0}")]
     Network(String),
-    #[error("OpenCode Go returned invalid response: {0}")]
+    #[error("MiMo API returned invalid response: {0}")]
     Invalid(String),
 }
 
 #[derive(Clone)]
-pub struct OpenCodeGoClient {
+pub struct MimoClient {
     base_url: String,
     api_key: String,
     client: reqwest::Client,
 }
 
-impl OpenCodeGoClient {
+impl MimoClient {
     pub fn new(
         base_url: impl Into<String>,
         api_key: impl Into<String>,
@@ -104,7 +104,7 @@ impl OpenCodeGoClient {
         );
         headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
         headers.insert(ACCEPT, accept.parse().unwrap());
-        headers.insert(USER_AGENT, "codex-opencode-adapter-rs/0.2".parse().unwrap());
+        headers.insert(USER_AGENT, "codex-mimo-adapter-rs/0.2".parse().unwrap());
         Ok(headers)
     }
 

@@ -1,6 +1,6 @@
-use codex_opencode_adapter::conversion::responses_to_chat::build_chat_payload;
-use codex_opencode_adapter::conversion::{build_response, multimodal_input};
-use codex_opencode_adapter::media_guard::{
+use codex_mimo_adapter::conversion::responses_to_chat::build_chat_payload;
+use codex_mimo_adapter::conversion::{build_response, multimodal_input};
+use codex_mimo_adapter::media_guard::{
     detect_multimodal_usage, find_unsupported_multimodal_input, is_multimodal_unsupported_error,
 };
 use serde_json::json;
@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 #[test]
 fn responses_request_maps_mixed_multimodal_content_parts() {
     let body = json!({
-        "model": "opencode-go/multimodal-model",
+        "model": "mimo/multimodal-model",
         "input": [{
             "type": "message",
             "role": "user",
@@ -48,7 +48,7 @@ fn responses_request_maps_base64_source_image_to_image_url() {
 #[test]
 fn responses_request_does_not_emit_chat_file_for_url_only_input_file() {
     let body = json!({
-        "model": "opencode-go/multimodal-model",
+        "model": "mimo/multimodal-model",
         "input": [
             {"type":"input_file","file":{"url":"https://example.com/doc.pdf","filename":"doc.pdf"}},
             "fallback text"
@@ -63,7 +63,7 @@ fn responses_request_does_not_emit_chat_file_for_url_only_input_file() {
 #[test]
 fn media_guard_rejects_known_text_only_models_before_upstream() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": [{"type":"input_image","image_url":"data:image/png;base64,abc"}]
     });
     let (payload, _messages, _reverse, _tool_ctx) =
@@ -77,7 +77,7 @@ fn media_guard_rejects_known_text_only_models_before_upstream() {
 #[test]
 fn media_guard_passes_unknown_model_through() {
     let body = json!({
-        "model": "opencode-go/unknown-model",
+        "model": "mimo/unknown-model",
         "input": [{"type":"input_image","image_url":"data:image/png;base64,abc"}]
     });
     let (payload, _messages, _reverse, _tool_ctx) =
@@ -98,7 +98,7 @@ fn detects_upstream_multimodal_unsupported_errors() {
 
 #[test]
 fn chat_response_content_array_extracts_text_and_keeps_json_fallback() {
-    let body = json!({"model":"opencode-go/test","input":"hi"});
+    let body = json!({"model":"mimo/test","input":"hi"});
     let (payload, messages, _reverse, tool_ctx) =
         build_chat_payload(&body, "test", None, json!({})).unwrap();
     let stored = Arc::new(Mutex::new(None));
@@ -120,7 +120,7 @@ fn chat_response_content_array_extracts_text_and_keeps_json_fallback() {
     let response = build_response(
         &body,
         &chat,
-        "opencode-go/test",
+        "mimo/test",
         payload["model"].as_str().unwrap(),
         &messages,
         &tool_ctx,

@@ -243,8 +243,8 @@ async fn mock_models() -> Json<Value> {
     Json(json!({
         "object": "list",
         "data": [
-            {"id": "deepseek-v4-flash", "object": "model", "owned_by": "opencode-go"},
-            {"id": "kimi-k2.6", "object": "model", "owned_by": "opencode-go"}
+            {"id": "deepseek-v4-flash", "object": "model", "owned_by": "mimo"},
+            {"id": "kimi-k2.6", "object": "model", "owned_by": "mimo"}
         ]
     }))
 }

@@ -1,4 +1,4 @@
-use codex_opencode_adapter::state::{now_ts, StateStore, StoredResponse};
+use codex_mimo_adapter::state::{now_ts, StateStore, StoredResponse};
 use serde_json::{json, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,7 +9,7 @@ fn temp_db_path(name: &str) -> String {
         .as_nanos();
     std::env::temp_dir()
         .join(format!(
-            "codex_opencode_adapter_state_{name}_{}_{}.sqlite",
+            "codex_mimo_adapter_state_{name}_{}_{}.sqlite",
             std::process::id(),
             nanos
         ))
@@ -20,7 +20,7 @@ fn temp_db_path(name: &str) -> String {
 fn stored_response(response_id: &str, pending_call_ids: Vec<&str>) -> StoredResponse {
     StoredResponse {
         response_id: response_id.to_string(),
-        model_alias: "opencode-go/test".to_string(),
+        model_alias: "mimo/test".to_string(),
         model_upstream: "test".to_string(),
         messages: vec![json!({"role":"assistant","content":""})],
         pending_call_ids: pending_call_ids.into_iter().map(str::to_string).collect(),

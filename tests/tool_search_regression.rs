@@ -1,13 +1,13 @@
-use codex_opencode_adapter::conversion::responses_to_chat::build_chat_payload;
-use codex_opencode_adapter::conversion::{build_response, StreamAssembler};
-use codex_opencode_adapter::state::StoredResponse;
+use codex_mimo_adapter::conversion::responses_to_chat::build_chat_payload;
+use codex_mimo_adapter::conversion::{build_response, StreamAssembler};
+use codex_mimo_adapter::state::StoredResponse;
 use serde_json::{json, Map, Value};
 use std::sync::{Arc, Mutex};
 
 #[test]
 fn tool_search_uses_query_limit_schema() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Find a tool",
         "tools": [{"type":"tool_search"}],
         "stream": true
@@ -27,7 +27,7 @@ fn tool_search_uses_query_limit_schema() {
 #[test]
 fn nonstream_tool_search_restores_response_item() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Find a tool",
         "tools": [{"type":"tool_search"}],
         "stream": false
@@ -59,7 +59,7 @@ fn nonstream_tool_search_restores_response_item() {
     let response = build_response(
         &body,
         &upstream,
-        "opencode-go/deepseek-v4-pro",
+        "mimo/deepseek-v4-pro",
         "deepseek-v4-pro",
         &messages,
         &tool_ctx,
@@ -85,7 +85,7 @@ fn nonstream_tool_search_restores_response_item() {
 #[test]
 fn streaming_tool_search_does_not_emit_custom_input_events() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Find a tool",
         "tools": [{"type":"tool_search"}],
         "stream": true
@@ -98,7 +98,7 @@ fn streaming_tool_search_does_not_emit_custom_input_events() {
     let stored_for_put = Arc::clone(&stored);
     let mut assembler = StreamAssembler::new(
         body,
-        "opencode-go/deepseek-v4-pro".to_string(),
+        "mimo/deepseek-v4-pro".to_string(),
         "deepseek-v4-pro".to_string(),
         messages,
         tool_ctx,
@@ -158,7 +158,7 @@ fn streaming_tool_search_does_not_emit_custom_input_events() {
 #[test]
 fn streaming_custom_tool_buffers_split_arguments_until_finalize() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Record a note",
         "tools": [{"type":"custom","name":"custom.echo"}],
         "stream": true
@@ -171,7 +171,7 @@ fn streaming_custom_tool_buffers_split_arguments_until_finalize() {
     let stored_for_put = Arc::clone(&stored);
     let mut assembler = StreamAssembler::new(
         body,
-        "opencode-go/deepseek-v4-pro".to_string(),
+        "mimo/deepseek-v4-pro".to_string(),
         "deepseek-v4-pro".to_string(),
         messages,
         tool_ctx,

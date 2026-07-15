@@ -1,5 +1,5 @@
-use codex_opencode_adapter::conversion::responses_to_chat::build_chat_payload;
-use codex_opencode_adapter::conversion::tool_context::ToolContext;
+use codex_mimo_adapter::conversion::responses_to_chat::build_chat_payload;
+use codex_mimo_adapter::conversion::tool_context::ToolContext;
 use serde_json::{json, Value};
 
 #[test]
@@ -33,7 +33,7 @@ fn rust_tool_context_handles_namespace_and_custom() {
 #[test]
 fn rust_request_transform_maps_tools_and_tool_choice() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "instructions": "System.",
         "input": [{"type":"message","role":"developer","content":"Dev."}, "Hi"],
         "tools": [{"type":"function","name":"mcp.read","parameters":{"type":"object"}}],
@@ -59,7 +59,7 @@ fn rust_request_transform_maps_tools_and_tool_choice() {
 #[test]
 fn rust_input_image_with_url_string() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "mimo/deepseek-v4-flash",
         "input": [
             {"type": "input_image", "url": "https://example.com/cat.png"},
             {"type": "message", "role": "user", "content": "What is this?"}
@@ -81,7 +81,7 @@ fn rust_input_image_with_url_string() {
 #[test]
 fn rust_input_image_with_image_url_object() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "mimo/deepseek-v4-flash",
         "input": [
             {
                 "type": "input_image",
@@ -103,7 +103,7 @@ fn rust_input_image_with_image_url_object() {
 #[test]
 fn rust_input_file() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "mimo/deepseek-v4-flash",
         "input": [
             {
                 "type": "input_file",
@@ -122,7 +122,7 @@ fn rust_input_file() {
 #[test]
 fn rust_input_file_top_level_fields() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "mimo/deepseek-v4-flash",
         "input": [
             {"type": "input_file", "filename": "report.txt", "file_data": "abc"}
         ]
@@ -138,7 +138,7 @@ fn rust_input_file_top_level_fields() {
 #[test]
 fn rust_input_audio() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-flash",
+        "model": "mimo/deepseek-v4-flash",
         "input": [
             {
                 "type": "input_audio",
@@ -157,7 +157,7 @@ fn rust_input_audio() {
 #[test]
 fn rust_tool_choice_tool_search_matches_registered_name() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Find a tool",
         "tools": [{"type":"tool_search"}, {"type":"function","name":"my_func","parameters":{"type":"object"}}],
         "tool_choice": {"type":"tool_search"},
@@ -178,11 +178,10 @@ fn rust_tool_choice_tool_search_matches_registered_name() {
     assert_eq!(payload["tool_choice"]["type"], "function");
 }
 
-
 #[test]
 fn custom_tool_call_output_content_does_not_include_metadata() {
     let body = json!({
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": [
             {"type":"custom_tool_call","call_id":"ctc_1","name":"my_tool","input":"do_stuff","status":"completed"},
             {"type":"custom_tool_call_output","call_id":"ctc_1","output":"tool_result","id":"fo_1"},
@@ -193,21 +192,35 @@ fn custom_tool_call_output_content_does_not_include_metadata() {
     let (payload, _messages, _reverse, _tool_ctx) =
         build_chat_payload(&body, "test-model", None, json!({})).unwrap();
     let messages = payload["messages"].as_array().unwrap();
-    let tool_msg = messages.iter().find(|m| {
-        m.get("role").and_then(Value::as_str) == Some("tool")
-            && m.get("tool_call_id").and_then(Value::as_str) == Some("ctc_1")
-    }).expect("tool message should exist");
-    let content = tool_msg.get("content").and_then(Value::as_str).unwrap_or("");
-    assert_eq!(content, "tool_result",
-        "custom_tool_call_output content should be the output field value, not the whole item");
-    assert!(!content.contains("type"), "content should not contain type metadata");
-    assert!(!content.contains("fo_1"), "content should not contain id metadata");
+    let tool_msg = messages
+        .iter()
+        .find(|m| {
+            m.get("role").and_then(Value::as_str) == Some("tool")
+                && m.get("tool_call_id").and_then(Value::as_str) == Some("ctc_1")
+        })
+        .expect("tool message should exist");
+    let content = tool_msg
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    assert_eq!(
+        content, "tool_result",
+        "custom_tool_call_output content should be the output field value, not the whole item"
+    );
+    assert!(
+        !content.contains("type"),
+        "content should not contain type metadata"
+    );
+    assert!(
+        !content.contains("fo_1"),
+        "content should not contain id metadata"
+    );
 }
 
 #[test]
 fn tool_search_output_content_does_not_include_metadata() {
     let body = json!({
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": [
             {"type":"tool_search_call","call_id":"tsc_1","execution":"client","arguments":{"query":"find tool"}},
             {"type":"tool_search_output","call_id":"tsc_1","output":["result1"],"id":"tso_1"},
@@ -218,22 +231,39 @@ fn tool_search_output_content_does_not_include_metadata() {
     let (payload, _messages, _reverse, _tool_ctx) =
         build_chat_payload(&body, "test-model", None, json!({})).unwrap();
     let messages = payload["messages"].as_array().unwrap();
-    let tool_msg = messages.iter().find(|m| {
-        m.get("role").and_then(Value::as_str) == Some("tool")
-            && m.get("tool_call_id").and_then(Value::as_str) == Some("tsc_1")
-    }).expect("tool message should exist");
-    let content = tool_msg.get("content").and_then(Value::as_str).unwrap_or("");
-    assert_eq!(content, "result1",
-        "tool_search_output content should be the output field value only");
-    assert!(!content.contains("type"), "content should not contain type metadata");
-    assert!(!content.contains("tso_1"), "content should not contain id metadata");
-    assert!(!content.contains("call_id"), "content should not contain call_id metadata");
+    let tool_msg = messages
+        .iter()
+        .find(|m| {
+            m.get("role").and_then(Value::as_str) == Some("tool")
+                && m.get("tool_call_id").and_then(Value::as_str) == Some("tsc_1")
+        })
+        .expect("tool message should exist");
+    let content = tool_msg
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    assert_eq!(
+        content, "result1",
+        "tool_search_output content should be the output field value only"
+    );
+    assert!(
+        !content.contains("type"),
+        "content should not contain type metadata"
+    );
+    assert!(
+        !content.contains("tso_1"),
+        "content should not contain id metadata"
+    );
+    assert!(
+        !content.contains("call_id"),
+        "content should not contain call_id metadata"
+    );
 }
 
 #[test]
 fn function_call_output_content_unchanged_by_alignment() {
     let body = json!({
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": [
             {"type":"function_call","call_id":"call_1","name":"run","arguments":"{}"},
             {"type":"function_call_output","call_id":"call_1","output":"ok"},
@@ -243,12 +273,18 @@ fn function_call_output_content_unchanged_by_alignment() {
     let (payload, _messages, _reverse, _tool_ctx) =
         build_chat_payload(&body, "test-model", None, json!({})).unwrap();
     let messages = payload["messages"].as_array().unwrap();
-    let tool_msg = messages.iter().find(|m| {
-        m.get("role").and_then(Value::as_str) == Some("tool")
-            && m.get("tool_call_id").and_then(Value::as_str) == Some("call_1")
-    }).expect("tool message should exist");
+    let tool_msg = messages
+        .iter()
+        .find(|m| {
+            m.get("role").and_then(Value::as_str) == Some("tool")
+                && m.get("tool_call_id").and_then(Value::as_str) == Some("call_1")
+        })
+        .expect("tool message should exist");
     assert_eq!(
-        tool_msg.get("content").and_then(Value::as_str).unwrap_or(""),
+        tool_msg
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
         "ok",
         "function_call_output content should remain as output field text"
     );

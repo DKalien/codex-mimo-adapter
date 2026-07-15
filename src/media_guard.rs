@@ -108,7 +108,7 @@ fn scan_value(value: &Value, usage: &mut MultimodalUsage) {
 fn normalize_model(model: &str) -> String {
     model
         .trim()
-        .trim_start_matches("opencode-go/")
+        .trim_start_matches("mimo/")
         .to_ascii_lowercase()
 }
 

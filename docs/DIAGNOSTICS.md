@@ -5,11 +5,11 @@ This document explains adapter log events that are useful when Codex tool-result
 ## Enable debug logs
 
 ```powershell
-$env:RUST_LOG = "codex_opencode_adapter=debug"
+$env:RUST_LOG = "codex_mimo_adapter=debug"
 cargo run --release
 ```
 
-The default tracing filter is `codex_opencode_adapter=info`.
+The default tracing filter is `codex_mimo_adapter=info`.
 
 ## Tool continuation events
 
@@ -61,7 +61,7 @@ response.failed
 [DONE]
 ```
 
-Unknown model capabilities are passed through to OpenCode Go. If the upstream returns a known multimodal unsupported error, the adapter translates it into the same Responses-level failure.
+Unknown model capabilities are passed through to MiMo Token Plan. If the upstream returns a known multimodal unsupported error, the adapter translates it into the same Responses-level failure.
 
 ## Streaming failures
 

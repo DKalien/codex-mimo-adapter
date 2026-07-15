@@ -1,4 +1,4 @@
-codex-opencode-adapter
+codex-mimo-adapter
 
 This project contains protocol-conversion logic independently implemented in Python.
 Parts of the conversion design are informed by cc-switch:

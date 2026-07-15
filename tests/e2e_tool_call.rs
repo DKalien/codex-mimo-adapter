@@ -13,7 +13,7 @@ async fn test_e2e_nonstreaming_tool_call() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "model": routed_model("mimo/deepseek-v4-flash"),
             "input": "What's the weather?",
             "tools": [{
                 "type": "function",
@@ -71,7 +71,7 @@ async fn test_e2e_streaming_tool_call() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "model": routed_model("mimo/deepseek-v4-flash"),
             "input": "What's the weather?",
             "tools": [{
                 "type": "function",

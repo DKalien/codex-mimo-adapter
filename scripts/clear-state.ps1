@@ -6,10 +6,10 @@ param(
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 if ([string]::IsNullOrWhiteSpace($StateDb)) {
-    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_OPENCODE_STATE_DB)) {
-        $StateDb = $env:CODEX_OPENCODE_STATE_DB
+    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_MIMO_STATE_DB)) {
+        $StateDb = $env:CODEX_MIMO_STATE_DB
     } else {
-        $StateDb = ".codex-opencode/state.sqlite"
+        $StateDb = ".codex-mimo/state.sqlite"
     }
 }
 

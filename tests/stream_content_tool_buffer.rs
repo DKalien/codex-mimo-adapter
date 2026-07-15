@@ -1,13 +1,13 @@
-use codex_opencode_adapter::conversion::responses_to_chat::build_chat_payload;
-use codex_opencode_adapter::conversion::StreamAssembler;
-use codex_opencode_adapter::state::StoredResponse;
+use codex_mimo_adapter::conversion::responses_to_chat::build_chat_payload;
+use codex_mimo_adapter::conversion::StreamAssembler;
+use codex_mimo_adapter::state::StoredResponse;
 use serde_json::{json, Map, Value};
 use std::sync::{Arc, Mutex};
 
 #[test]
 fn streaming_content_before_tool_call_does_not_emit_message_output() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Use a tool",
         "tools": [{"type":"function","name":"run","parameters":{"type":"object"}}],
         "stream": true
@@ -20,7 +20,7 @@ fn streaming_content_before_tool_call_does_not_emit_message_output() {
     let stored_for_put = Arc::clone(&stored);
     let mut assembler = StreamAssembler::new(
         body,
-        "opencode-go/deepseek-v4-pro".to_string(),
+        "mimo/deepseek-v4-pro".to_string(),
         "deepseek-v4-pro".to_string(),
         messages,
         tool_ctx,
@@ -89,7 +89,7 @@ fn streaming_content_before_tool_call_does_not_emit_message_output() {
 #[test]
 fn streaming_content_without_tools_keeps_incremental_text_deltas() {
     let body = json!({
-        "model": "opencode-go/deepseek-v4-pro",
+        "model": "mimo/deepseek-v4-pro",
         "input": "Answer normally",
         "stream": true
     });
@@ -101,7 +101,7 @@ fn streaming_content_without_tools_keeps_incremental_text_deltas() {
     let stored_for_put = Arc::clone(&stored);
     let mut assembler = StreamAssembler::new(
         body,
-        "opencode-go/deepseek-v4-pro".to_string(),
+        "mimo/deepseek-v4-pro".to_string(),
         "deepseek-v4-pro".to_string(),
         messages,
         tool_ctx,

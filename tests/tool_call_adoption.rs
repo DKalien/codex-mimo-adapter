@@ -1,12 +1,12 @@
-use codex_opencode_adapter::conversion::chat_to_responses::build_response;
-use codex_opencode_adapter::conversion::tool_context::ToolContext;
-use codex_opencode_adapter::state::StoredResponse;
+use codex_mimo_adapter::conversion::chat_to_responses::build_response;
+use codex_mimo_adapter::conversion::tool_context::ToolContext;
+use codex_mimo_adapter::state::StoredResponse;
 use serde_json::{json, Value};
 
 #[test]
 fn nonstream_content_with_tool_calls_outputs_only_tool_call_item() {
     let body = json!({
-        "model": "opencode-go/test-model",
+        "model": "mimo/test-model",
         "input": "What is the weather in Tokyo?",
         "tools": [{
             "type": "function",
@@ -49,7 +49,7 @@ fn nonstream_content_with_tool_calls_outputs_only_tool_call_item() {
     let response = build_response(
         &body,
         &chat_response,
-        "opencode-go/test-model",
+        "mimo/test-model",
         "test-model",
         &[],
         &context,

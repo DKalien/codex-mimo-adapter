@@ -1,10 +1,12 @@
 .env
-.codex-opencode-adapter.env
+.codex-mimo-adapter.env
 target/
 Cargo.lock
 *.db
 *.sqlite
 *.sqlite3
 *.log
-.codex-opencode/
+.codex-mimo/
 tmp_*
+
+build/

@@ -1,8 +1,8 @@
-use codex_opencode_adapter::codex_chat_history::{
+use codex_mimo_adapter::codex_chat_history::{
     ensure_no_duplicate_call_outputs, validate_chat_tool_history, validate_requested_call_ids,
     HistoryResolutionError,
 };
-use codex_opencode_adapter::state::{now_ts, StoredResponse};
+use codex_mimo_adapter::state::{now_ts, StoredResponse};
 use serde_json::{json, Value};
 
 fn stored_response(response_id: &str, pending_call_ids: Vec<&str>) -> StoredResponse {
@@ -19,7 +19,7 @@ fn stored_response(response_id: &str, pending_call_ids: Vec<&str>) -> StoredResp
 
     StoredResponse {
         response_id: response_id.to_string(),
-        model_alias: "opencode-go/test".to_string(),
+        model_alias: "mimo/test".to_string(),
         model_upstream: "test".to_string(),
         messages: vec![json!({"role":"assistant","content":"","tool_calls": tool_calls})],
         pending_call_ids: pending_call_ids.into_iter().map(str::to_string).collect(),

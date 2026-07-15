@@ -2,7 +2,7 @@
 
 ## 概要
 
-这份文档记录 2026-06-25 对 `codex-opencode-adapter` 进行的真实 OpenCode Go 链路验证结果。
+这份文档记录 2026-06-25 对 `codex-mimo-adapter` 进行的真实 MiMo Token Plan 链路验证结果。
 
 目标不是替代 `docs/VALIDATION.zh-CN.md` 的操作手册，而是沉淀：
 
@@ -13,38 +13,38 @@
 ## 验证环境
 
 - 日期：`2026-06-25`
-- adapter 仓库：`D:\AI-Tools\codex-opencode-adapter`
-- 上游 base URL：`https://opencode.ai/zen/go/v1`
+- adapter 仓库：`D:\AI-Tools\codex-mimo-adapter`
+- 上游 base URL：`https://token-plan-cn.xiaomimimo.com/v1`
 - adapter 本地地址：`http://127.0.0.1:4010`
-- 本地鉴权：`Bearer codex-opencode-local`
-- 并发限制：`CODEX_OPENCODE_MAX_CONCURRENCY=1`
+- 本地鉴权：`Bearer codex-mimo-local`
+- 并发限制：`CODEX_MIMO_MAX_CONCURRENCY=1`
 - 说明：这是当次真实验证时的人工测试配置，不代表适配器默认只能单并发；当前默认值是 `8`。
-- 日志级别：`RUST_LOG=codex_opencode_adapter=debug`
+- 日志级别：`RUST_LOG=codex_mimo_adapter=debug`
 
 ## 本次使用模型
 
-- 纯文本主测模型：`opencode-go/deepseek-v4-flash`
-- 多模态主测模型：`opencode-go/mimo-v2.5`
+- 纯文本主测模型：`mimo/deepseek-v4-flash`
+- 多模态主测模型：`mimo/mimo-v2.5`
 
 本次实际从 `/v1/models` 读取到的相关模型还包括：
 
-- `opencode-go/deepseek-v4-pro`
-- `opencode-go/glm-5`
-- `opencode-go/glm-5.1`
-- `opencode-go/glm-5.2`
-- `opencode-go/kimi-k2.5`
-- `opencode-go/kimi-k2.6`
-- `opencode-go/kimi-k2.7-code`
-- `opencode-go/minimax-m2.5`
-- `opencode-go/minimax-m2.7`
-- `opencode-go/minimax-m3`
-- `opencode-go/mimo-v2-pro`
-- `opencode-go/mimo-v2-omni`
-- `opencode-go/mimo-v2.5-pro`
-- `opencode-go/qwen3.5-plus`
-- `opencode-go/qwen3.6-plus`
-- `opencode-go/qwen3.7-plus`
-- `opencode-go/qwen3.7-max`
+- `mimo/deepseek-v4-pro`
+- `mimo/glm-5`
+- `mimo/glm-5.1`
+- `mimo/glm-5.2`
+- `mimo/kimi-k2.5`
+- `mimo/kimi-k2.6`
+- `mimo/kimi-k2.7-code`
+- `mimo/minimax-m2.5`
+- `mimo/minimax-m2.7`
+- `mimo/minimax-m3`
+- `mimo/mimo-v2-pro`
+- `mimo/mimo-v2-omni`
+- `mimo/mimo-v2.5-pro`
+- `mimo/qwen3.5-plus`
+- `mimo/qwen3.6-plus`
+- `mimo/qwen3.7-plus`
+- `mimo/qwen3.7-max`
 
 ## 已通过的真实验证
 
@@ -55,12 +55,12 @@
 观察：
 
 - adapter 可以正常代理上游模型列表
-- 返回模型名保留 `opencode-go/` 前缀
+- 返回模型名保留 `mimo/` 前缀
 - `deepseek-v4-flash` 与 `mimo-v2.5` 均在真实返回列表中
 
 ### 2. 非流式文本请求
 
-模型：`opencode-go/deepseek-v4-flash`
+模型：`mimo/deepseek-v4-flash`
 
 结果：通过
 
@@ -74,7 +74,7 @@
 
 ### 3. 流式文本请求
 
-模型：`opencode-go/deepseek-v4-flash`
+模型：`mimo/deepseek-v4-flash`
 
 结果：通过
 
@@ -95,7 +95,7 @@
 
 ### 4. 纯文本模型的多模态失败
 
-模型：`opencode-go/deepseek-v4-flash`
+模型：`mimo/deepseek-v4-flash`
 
 结果：通过
 
@@ -115,7 +115,7 @@
 
 ### 5. 多模态输入链路
 
-模型：`opencode-go/mimo-v2.5`
+模型：`mimo/mimo-v2.5`
 
 结果：通过
 
@@ -138,7 +138,7 @@
 
 ### 6. 非流式 function call
 
-模型：`opencode-go/deepseek-v4-flash`
+模型：`mimo/deepseek-v4-flash`
 
 结果：通过
 
@@ -160,7 +160,7 @@
 
 ### 7. `previous_response_id` continuation
 
-模型：`opencode-go/deepseek-v4-flash`
+模型：`mimo/deepseek-v4-flash`
 
 结果：通过
 
@@ -182,7 +182,7 @@
 
 ### 8. Stateless full-history continuation
 
-模型：`opencode-go/deepseek-v4-flash`
+模型：`mimo/deepseek-v4-flash`
 
 结果：通过
 
@@ -211,7 +211,7 @@
 
 ### 9. 流式 function call
 
-模型：`opencode-go/deepseek-v4-flash`
+模型：`mimo/deepseek-v4-flash`
 
 结果：通过
 
@@ -235,7 +235,7 @@
 
 ### 10. 非流式 custom tool
 
-模型：`opencode-go/deepseek-v4-flash`
+模型：`mimo/deepseek-v4-flash`
 
 结果：通过
 
@@ -252,7 +252,7 @@
 
 ### 11. 非流式 tool search
 
-模型：`opencode-go/deepseek-v4-flash`
+模型：`mimo/deepseek-v4-flash`
 
 结果：通过
 
@@ -273,7 +273,7 @@
 
 由于本次按手册设置：
 
-- `CODEX_OPENCODE_MAX_CONCURRENCY=1`
+- `CODEX_MIMO_MAX_CONCURRENCY=1`
 
 当并行发起多个真实请求时，adapter 会返回：
 
@@ -341,7 +341,7 @@
 
 ## 结论
 
-截至 `2026-06-25`，`codex-opencode-adapter` 已在真实 OpenCode Go 上游上验证通过以下关键能力：
+截至 `2026-06-25`，`codex-mimo-adapter` 已在真实 MiMo Token Plan 上游上验证通过以下关键能力：
 
 - 模型列表代理
 - 文本非流式与流式响应

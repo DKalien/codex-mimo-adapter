@@ -1,16 +1,16 @@
 use clap::Parser;
-use codex_opencode_adapter::cli::{AuthCommands, Cli, Commands, RunArgs};
-use codex_opencode_adapter::config::{
+use codex_mimo_adapter::cli::{AuthCommands, Cli, Commands, RunArgs};
+use codex_mimo_adapter::config::{
     Config, ConfigOverrides, DEFAULT_HOST, DEFAULT_MAX_CONCURRENCY, DEFAULT_PORT,
 };
-use codex_opencode_adapter::init::run_init;
-use codex_opencode_adapter::project::{
+use codex_mimo_adapter::init::run_init;
+use codex_mimo_adapter::project::{
     current_environment, read_project_env, registry_dir_path, sign_adapter_token, ProjectPaths,
     ProjectRegistry, PROJECT_ENV_FILENAME,
 };
-use codex_opencode_adapter::server::{router, AppState, ProjectRuntime};
-use codex_opencode_adapter::state::StateStore;
-use codex_opencode_adapter::upstream::OpenCodeGoClient;
+use codex_mimo_adapter::server::{router, AppState, ProjectRuntime};
+use codex_mimo_adapter::state::StateStore;
+use codex_mimo_adapter::upstream::MimoClient;
 use std::sync::{Arc, RwLock};
 use tokio::sync::Semaphore;
 use tracing_subscriber::EnvFilter;
@@ -18,7 +18,7 @@ use tracing_subscriber::EnvFilter;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("codex_opencode_adapter=info"));
+        .unwrap_or_else(|_| EnvFilter::new("codex_mimo_adapter=info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let cli = Cli::parse();
@@ -41,7 +41,7 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
     let registry = ProjectRegistry::load(&reg_dir);
     if registry.projects.is_empty() {
         return Err(anyhow::anyhow!(
-            "No projects found in registry. Run 'codex-opencode-adapter init' first."
+            "No projects found in registry. Run 'codex-mimo-adapter init' first."
         ));
     }
 
@@ -78,7 +78,7 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
             state_db_path.display().to_string(),
             config.state_ttl_seconds,
         )?;
-        let client = OpenCodeGoClient::new(
+        let client = MimoClient::new(
             &config.upstream_base,
             &config.upstream_key,
             config.timeout_seconds,
@@ -150,17 +150,20 @@ async fn run_check() -> anyhow::Result<()> {
         .map_err(|_| {
             if config.is_some() {
                 anyhow::anyhow!(
-                    "Adapter is not running at {base}. Start it with 'codex-opencode-adapter run' or 'codex-opencode-adapter start'."
+                    "Adapter is not running at {base}. Start it with 'codex-mimo-adapter run' or 'codex-mimo-adapter start'."
                 )
             } else {
                 anyhow::anyhow!(
                     "Could not reach adapter at {base}.\n\
-                     Either start the adapter, or run from a project directory / set CODEX_OPENCODE_PROJECT_ID\n\
+                     Either start the adapter, or run from a project directory / set CODEX_MIMO_PROJECT_ID\n\
                      to check the correct host/port from your project configuration."
                 )
             }
         })?;
-    anyhow::ensure!(health.status().is_success(), "health check failed at {base}");
+    anyhow::ensure!(
+        health.status().is_success(),
+        "health check failed at {base}"
+    );
     println!("\u{2713} Adapter health check passed at {base}");
 
     // Phase 3: Models check requires project context.
@@ -170,7 +173,9 @@ async fn run_check() -> anyhow::Result<()> {
                 .local_token
                 .as_deref()
                 .filter(|v| !v.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("CODEX_OPENCODE_LOCAL_TOKEN is missing in project config"))?;
+                .ok_or_else(|| {
+                    anyhow::anyhow!("CODEX_MIMO_LOCAL_TOKEN is missing in project config")
+                })?;
             let signed_token = sign_adapter_token(raw_token);
 
             let models = client
@@ -185,7 +190,7 @@ async fn run_check() -> anyhow::Result<()> {
         None => {
             println!("\u{2713} Adapter is reachable.");
             println!("  For full verification including /v1/models, run from a project directory");
-            println!("  or set CODEX_OPENCODE_PROJECT_ID to your project ID.");
+            println!("  or set CODEX_MIMO_PROJECT_ID to your project ID.");
         }
     }
 
@@ -198,7 +203,7 @@ fn load_adapter_token_secret() -> anyhow::Result<String> {
         if paths.env_file.exists() {
             let project_env = read_project_env(&paths.env_file)?;
             if let Some(token) = project_env
-                .get("CODEX_OPENCODE_LOCAL_TOKEN")
+                .get("CODEX_MIMO_LOCAL_TOKEN")
                 .filter(|value| !value.is_empty())
             {
                 return Ok(token.to_string());
@@ -219,7 +224,7 @@ fn load_adapter_token_secret() -> anyhow::Result<String> {
         }
         let project_env = read_project_env(&env_path)?;
         if let Some(token) = project_env
-            .get("CODEX_OPENCODE_LOCAL_TOKEN")
+            .get("CODEX_MIMO_LOCAL_TOKEN")
             .filter(|value| !value.is_empty())
         {
             return Ok(token.to_string());
@@ -227,7 +232,7 @@ fn load_adapter_token_secret() -> anyhow::Result<String> {
     }
 
     Err(anyhow::anyhow!(
-        "CODEX_OPENCODE_LOCAL_TOKEN is missing. Run 'codex-opencode-adapter init' from a project root first."
+        "CODEX_MIMO_LOCAL_TOKEN is missing. Run 'codex-mimo-adapter init' from a project root first."
     ))
 }
 
@@ -235,13 +240,13 @@ fn load_project_config(args: RunArgs) -> anyhow::Result<Config> {
     let project = ProjectPaths::from_current_dir()?;
     anyhow::ensure!(
         project.env_file.exists(),
-        "Project is not initialized. Run 'codex-opencode-adapter init' from the project root first."
+        "Project is not initialized. Run 'codex-mimo-adapter init' from the project root first."
     );
     let project_env = read_project_env(&project.env_file)?;
     // local_token must come only from CLI args or project .env file;
     // strip from process env to prevent accidental pollution.
     let mut env = current_environment();
-    env.remove("CODEX_OPENCODE_LOCAL_TOKEN");
+    env.remove("CODEX_MIMO_LOCAL_TOKEN");
     let overrides = ConfigOverrides {
         host: args.host,
         port: args.port,

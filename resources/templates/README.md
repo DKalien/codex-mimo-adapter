@@ -1,10 +1,10 @@
-﻿# resources/templates — Canonical OSS agent templates
+# resources/templates — Canonical OSS agent templates
 
-This directory holds the canonical copy of every OSS subagent configuration template shipped with codex-opencode-adapter.
+This directory holds the canonical copy of every OSS subagent configuration template shipped with codex-mimo-adapter.
 
 ## Purpose
 
-- The Rust binary `include_str!()`s (or otherwise embeds) files from this directory to produce default agent configs during `codex-opencode-adapter init`.
+- The Rust binary `include_str!()`s (or otherwise embeds) files from this directory to produce default agent configs during `codex-mimo-adapter init`.
 - `.codex/agents/*.toml` at the project root are the runtime/user-facing copies; this directory is the source of truth.
 - Keep these files in sync with `.codex/agents/` when updating agent models or instructions.
 
@@ -12,10 +12,10 @@ This directory holds the canonical copy of every OSS subagent configuration temp
 
 | File | Agent | Model | Reasoning effort |
 |---|---|---|---|
-| oss-flash.toml | oss_flash | opencode-go/deepseek-v4-flash | medium |
-| oss-mimo.toml | oss_mimo | opencode-go/mimo-v2.5 | medium |
-| oss-minimax.toml | oss_minimax | opencode-go/minimax-m3 | high |
-| oss-pro.toml | oss_pro | opencode-go/deepseek-v4-pro | high |
+| oss-flash.toml | oss_flash | mimo/deepseek-v4-flash | medium |
+| oss-mimo.toml | oss_mimo | mimo/mimo-v2.5 | medium |
+| oss-minimax.toml | oss_minimax | mimo/minimax-m3 | high |
+| oss-pro.toml | oss_pro | mimo/deepseek-v4-pro | high |
 
 ## Usage from Rust
 

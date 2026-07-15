@@ -1,10 +1,10 @@
 use axum::extract::State as AxumState;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use codex_opencode_adapter::config::{Config, ConfigOverrides};
-use codex_opencode_adapter::server::{self, AppState, ProjectRuntime};
-use codex_opencode_adapter::state::StateStore;
-use codex_opencode_adapter::upstream::OpenCodeGoClient;
+use codex_mimo_adapter::config::{Config, ConfigOverrides};
+use codex_mimo_adapter::server::{self, AppState, ProjectRuntime};
+use codex_mimo_adapter::state::StateStore;
+use codex_mimo_adapter::upstream::MimoClient;
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
@@ -81,7 +81,7 @@ async fn post_nonstream_request(
     client
         .post(format!("http://{adapter_addr}/v1/responses"))
         .json(&json!({
-            "model": "opencode_adapter/test_conc/opencode-go/deepseek-v4-flash",
+            "model": "mimo_adapter/test_conc/mimo/deepseek-v4-flash",
             "input": marker,
             "stream": false,
         }))
@@ -176,7 +176,7 @@ async fn mock_models() -> Json<Value> {
     Json(json!({
         "object": "list",
         "data": [
-            {"id": "deepseek-v4-flash", "object": "model", "owned_by": "opencode-go"}
+            {"id": "deepseek-v4-flash", "object": "model", "owned_by": "mimo"}
         ]
     }))
 }
@@ -189,9 +189,9 @@ async fn start_adapter(
         "concurrency_limit_regression_{}.sqlite",
         Uuid::new_v4()
     ));
-    let project_id = "opencode_adapter_test_conc".to_string();
+    let project_id = "mimo_adapter_test_conc".to_string();
     let raw_token = format!("codex-conc-raw-{}", Uuid::new_v4().simple());
-    let signed_token = codex_opencode_adapter::project::sign_adapter_token(&raw_token);
+    let signed_token = codex_mimo_adapter::project::sign_adapter_token(&raw_token);
     let config = Config {
         host: "127.0.0.1".to_string(),
         port: 0,
@@ -204,7 +204,7 @@ async fn start_adapter(
         max_request_bytes: 8 * 1024 * 1024,
         max_concurrency,
     };
-    let inner_client = OpenCodeGoClient::new(
+    let inner_client = MimoClient::new(
         &config.upstream_base,
         &config.upstream_key,
         config.timeout_seconds,

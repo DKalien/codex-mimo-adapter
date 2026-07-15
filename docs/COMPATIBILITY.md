@@ -4,15 +4,15 @@ This adapter is a deliberately thin protocol bridge:
 
 ```text
 Codex Responses API
-  <-> codex-opencode-adapter
-  <-> OpenCode Go Chat Completions-like API
+  <-> codex-mimo-adapter
+  <-> MiMo Token Plan Chat Completions-like API
 ```
 
 It converts protocol shapes. It does not run another agent system.
 
 ## Intended target
 
-The primary target is the Codex subagent -> OpenCode Go path.
+The primary target is the Codex subagent -> MiMo Token Plan path.
 
 The adapter should stay small and focused on protocol compatibility:
 
@@ -32,7 +32,7 @@ This project references cc-switch only for protocol-compatible behavior. It is n
 |---|---|
 | `src-tauri/src/proxy/providers/transform_codex_chat.rs` | Responses request -> Chat payload conversion, including input blocks, tool calls, tool outputs, and response history replay |
 | `src-tauri/src/proxy/providers/streaming_codex_chat.rs` | Chat streaming delta -> Responses SSE lifecycle for text, reasoning, tool calls, terminal events, and failed streams |
-| `src-tauri/src/proxy/providers/transform_opencode_go.rs` | OpenCode Go-specific compatibility details and OpenAI-compatible upstream behavior |
+| `MiMo-compatible upstream transform module` | MiMo Token Plan-specific compatibility details and OpenAI-compatible upstream behavior |
 | `src-tauri/src/proxy/providers/transform_responses.rs` | Responses output/event shapes and output text item compatibility |
 | `src-tauri/src/proxy/providers/transform.rs` | Content block normalization, including base64 image source -> `image_url` data URL behavior |
 | `src-tauri/src/proxy/media_sanitizer.rs` | Multimodal capability guard behavior and upstream unsupported-media detection |
@@ -41,9 +41,9 @@ This project references cc-switch only for protocol-compatible behavior. It is n
 | `src-tauri/src/proxy/providers/codex_chat_common.rs` | Reasoning extraction, `<think>` splitting, tool-call item construction, `call_id` extraction, and empty-value handling |
 | `src-tauri/src/proxy/providers/codex_chat_history.rs` | Tool-call history replay, `previous_response_id` restoration, unique `call_id` fallback, and omitted/re-written response-id cases |
 
-This project also references `goldtetsola/opencode-bridge` as a real-world Codex + OpenCode Go adapter experience source.
+This project also incorporates lessons from real-world Codex + MiMo Token Plan adapter operation.
 
-The reference scope is limited to adapter-layer behavior observed around real OpenCode Go usage:
+The reference scope is limited to adapter-layer behavior observed around real MiMo Token Plan usage:
 
 - SSE terminal handling and avoiding silent stream disconnects
 - early `response.created` emission and stream timeout avoidance
@@ -59,7 +59,7 @@ The reference scope is limited to adapter-layer behavior observed around real Op
 | Responses -> Chat request conversion | `src/conversion/responses_to_chat.rs`, `src/conversion/tool_context.rs`, `src/conversion/multimodal_input.rs` |
 | Chat -> Responses non-stream conversion | `src/conversion/chat_to_responses.rs`, `src/conversion/text.rs` |
 | Chat stream -> Responses stream conversion | `src/conversion/stream_chat_to_responses.rs`, `src/upstream.rs` |
-| OpenCode Go request/response integration | `src/server.rs`, `src/upstream.rs` |
+| MiMo Token Plan request/response integration | `src/server.rs`, `src/upstream.rs` |
 | Multimodal model capability guard | `src/media_guard.rs` |
 | State replay for tool continuations | `src/state.rs`, `src/codex_chat_history.rs` |
 
@@ -71,15 +71,15 @@ Not planned for this project:
 
 - full cc-switch port
 - provider aggregation platform
-- UI, hooks, plugins, statusLine, or OpenCode session management
+- UI, hooks, plugins, statusLine, or upstream session management
 - automatic model fallback/routing
 - automatic multimodal retry after stripping media
 - silent multimodal degradation that makes a text-only model pretend it saw media
-- MissionV1, OSS agent task tiers, evidence ledgers, RunRecord, patch escrow, claim gates, or burn-in framework from opencode-bridge
+- Mission-style task tiers, evidence ledgers, run records, patch escrow, claim gates, or burn-in frameworks
 
 ## Additional upstreams
 
-Additional upstream support is only planned after OpenCode Go is validated.
+Additional upstream support is only planned after MiMo Token Plan is validated.
 
 The preferred order is:
 

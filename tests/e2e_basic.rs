@@ -13,7 +13,7 @@ async fn test_e2e_nonstreaming_text() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "model": routed_model("mimo/deepseek-v4-flash"),
             "input": "Hello",
             "stream": false
         }))
@@ -68,7 +68,7 @@ async fn test_e2e_streaming_text() {
         .client
         .post(adapter_url(adapter.addr, "/v1/responses"))
         .json(&json!({
-            "model": routed_model("opencode-go/deepseek-v4-flash"),
+            "model": routed_model("mimo/deepseek-v4-flash"),
             "input": "Hello",
             "stream": true
         }))

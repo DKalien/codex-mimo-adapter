@@ -1,6 +1,6 @@
 mod common;
 
-use codex_opencode_adapter::project::{sign_adapter_token, ProjectRegistry, PROJECT_ENV_FILENAME};
+use codex_mimo_adapter::project::{sign_adapter_token, ProjectRegistry, PROJECT_ENV_FILENAME};
 use common::mock_upstream::start_mock_upstream;
 use common::{adapter_url, start_multi_project_adapter, ProjectConfig};
 use serde_json::Value;
@@ -95,7 +95,7 @@ async fn multi_project_wrong_token_gets_401() {
     let client = reqwest::Client::new();
     let resp = client
         .get(adapter_url(addr, "/v1/models"))
-        .bearer_auth("codex-opencode-fake-bad-token")
+        .bearer_auth("codex-mimo-fake-bad-token")
         .send()
         .await
         .unwrap();
@@ -104,7 +104,7 @@ async fn multi_project_wrong_token_gets_401() {
     // Token with valid-looking format but wrong HMAC -> 401.
     let resp2 = client
         .get(adapter_url(addr, "/v1/models"))
-        .bearer_auth("codex-opencode-nonexistent-00000000000000000000000000000000")
+        .bearer_auth("codex-mimo-nonexistent-00000000000000000000000000000000")
         .send()
         .await
         .unwrap();
@@ -188,7 +188,7 @@ async fn test_admin_refresh_loads_new_project() {
     std::env::set_var("USERPROFILE", &home);
     std::env::set_var("HOME", &home);
 
-    let reg_dir = home.join(".codex-opencode-adapter");
+    let reg_dir = home.join(".codex-mimo-adapter");
     std::fs::create_dir_all(&reg_dir).unwrap();
 
     let (upstream_a, _mock_a, _recv_a) = start_mock_upstream().await;
@@ -203,11 +203,11 @@ async fn test_admin_refresh_loads_new_project() {
     std::fs::write(
         proj_a_root.join(PROJECT_ENV_FILENAME),
         format!(
-            "OPENCODE_GO_API_KEY=key-a\nCODEX_OPENCODE_LOCAL_TOKEN={raw_a}\n             CODEX_OPENCODE_PROJECT_ID={pid_a}\n             OPENCODE_GO_BASE_URL=http://127.0.0.1:{port}\n             CODEX_OPENCODE_STATE_DB=.codex-opencode/state.sqlite\n             CODEX_OPENCODE_HOST=127.0.0.1\nCODEX_OPENCODE_PORT=4010\n",
+            "MIMO_API_KEY=key-a\nCODEX_MIMO_LOCAL_TOKEN={raw_a}\n             CODEX_MIMO_PROJECT_ID={pid_a}\n             MIMO_API_BASE_URL=http://127.0.0.1:{port}\n             CODEX_MIMO_STATE_DB=.codex-mimo/state.sqlite\n             CODEX_MIMO_HOST=127.0.0.1\nCODEX_MIMO_PORT=4010\n",
             port = upstream_a.port()
         ),
     ).unwrap();
-    std::fs::create_dir_all(proj_a_root.join(".codex-opencode")).unwrap();
+    std::fs::create_dir_all(proj_a_root.join(".codex-mimo")).unwrap();
 
     // --- Project B ---
     let proj_b_root = home.join("proj_b");
@@ -218,11 +218,11 @@ async fn test_admin_refresh_loads_new_project() {
     std::fs::write(
         proj_b_root.join(PROJECT_ENV_FILENAME),
         format!(
-            "OPENCODE_GO_API_KEY=key-b\nCODEX_OPENCODE_LOCAL_TOKEN={raw_b}\n             CODEX_OPENCODE_PROJECT_ID={pid_b}\n             OPENCODE_GO_BASE_URL=http://127.0.0.1:{port}\n             CODEX_OPENCODE_STATE_DB=.codex-opencode/state.sqlite\n             CODEX_OPENCODE_HOST=127.0.0.1\nCODEX_OPENCODE_PORT=4010\n",
+            "MIMO_API_KEY=key-b\nCODEX_MIMO_LOCAL_TOKEN={raw_b}\n             CODEX_MIMO_PROJECT_ID={pid_b}\n             MIMO_API_BASE_URL=http://127.0.0.1:{port}\n             CODEX_MIMO_STATE_DB=.codex-mimo/state.sqlite\n             CODEX_MIMO_HOST=127.0.0.1\nCODEX_MIMO_PORT=4010\n",
             port = upstream_b.port()
         ),
     ).unwrap();
-    std::fs::create_dir_all(proj_b_root.join(".codex-opencode")).unwrap();
+    std::fs::create_dir_all(proj_b_root.join(".codex-mimo")).unwrap();
 
     // --- Registry ---
     let mut registry = ProjectRegistry::load(&reg_dir);
@@ -312,7 +312,6 @@ async fn test_admin_refresh_loads_new_project() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-
 // ---------------------------------------------------------------------------
 // Admin refresh: removed projects and failure reporting.
 // ---------------------------------------------------------------------------
@@ -327,7 +326,7 @@ async fn test_admin_refresh_removes_deleted_project() {
     std::env::set_var("USERPROFILE", &home);
     std::env::set_var("HOME", &home);
 
-    let reg_dir = home.join(".codex-opencode-adapter");
+    let reg_dir = home.join(".codex-mimo-adapter");
     std::fs::create_dir_all(&reg_dir).unwrap();
 
     let (upstream_a, _mock_a, _recv_a) = start_mock_upstream().await;
@@ -342,11 +341,11 @@ async fn test_admin_refresh_removes_deleted_project() {
     std::fs::write(
         proj_a_root.join(PROJECT_ENV_FILENAME),
         format!(
-            "OPENCODE_GO_API_KEY=key-a\nCODEX_OPENCODE_LOCAL_TOKEN={raw_a}\n             CODEX_OPENCODE_PROJECT_ID={pid_a}\n             OPENCODE_GO_BASE_URL=http://127.0.0.1:{port}\n             CODEX_OPENCODE_STATE_DB=.codex-opencode/state.sqlite\n             CODEX_OPENCODE_HOST=127.0.0.1\nCODEX_OPENCODE_PORT=4010\n",
+            "MIMO_API_KEY=key-a\nCODEX_MIMO_LOCAL_TOKEN={raw_a}\n             CODEX_MIMO_PROJECT_ID={pid_a}\n             MIMO_API_BASE_URL=http://127.0.0.1:{port}\n             CODEX_MIMO_STATE_DB=.codex-mimo/state.sqlite\n             CODEX_MIMO_HOST=127.0.0.1\nCODEX_MIMO_PORT=4010\n",
             port = upstream_a.port()
         ),
     ).unwrap();
-    std::fs::create_dir_all(proj_a_root.join(".codex-opencode")).unwrap();
+    std::fs::create_dir_all(proj_a_root.join(".codex-mimo")).unwrap();
 
     // --- Project B ---
     let proj_b_root = home.join("proj_b");
@@ -357,11 +356,11 @@ async fn test_admin_refresh_removes_deleted_project() {
     std::fs::write(
         proj_b_root.join(PROJECT_ENV_FILENAME),
         format!(
-            "OPENCODE_GO_API_KEY=key-b\nCODEX_OPENCODE_LOCAL_TOKEN={raw_b}\n             CODEX_OPENCODE_PROJECT_ID={pid_b}\n             OPENCODE_GO_BASE_URL=http://127.0.0.1:{port}\n             CODEX_OPENCODE_STATE_DB=.codex-opencode/state.sqlite\n             CODEX_OPENCODE_HOST=127.0.0.1\nCODEX_OPENCODE_PORT=4010\n",
+            "MIMO_API_KEY=key-b\nCODEX_MIMO_LOCAL_TOKEN={raw_b}\n             CODEX_MIMO_PROJECT_ID={pid_b}\n             MIMO_API_BASE_URL=http://127.0.0.1:{port}\n             CODEX_MIMO_STATE_DB=.codex-mimo/state.sqlite\n             CODEX_MIMO_HOST=127.0.0.1\nCODEX_MIMO_PORT=4010\n",
             port = upstream_b.port()
         ),
     ).unwrap();
-    std::fs::create_dir_all(proj_b_root.join(".codex-opencode")).unwrap();
+    std::fs::create_dir_all(proj_b_root.join(".codex-mimo")).unwrap();
 
     // --- Registry with both projects ---
     let mut registry = ProjectRegistry::load(&reg_dir);
@@ -390,10 +389,21 @@ async fn test_admin_refresh_removes_deleted_project() {
         .unwrap();
     assert_eq!(resp.status(), 200, "first refresh should succeed");
     let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
-    // startup project ("opencode_adapter_{pid_a}") is removed by refresh,
+    // startup project ("mimo_adapter_{pid_a}") is removed by refresh,
     // then "project-a" and "project-b" are both added from registry
-    assert_eq!(body["added"].as_array().map(|a| a.len()).unwrap_or(0), 2, "should have added both projects");
-    assert!(body["added"].as_array().unwrap().iter().any(|v| v.as_str() == Some(pid_b)), "project-b should be added");
+    assert_eq!(
+        body["added"].as_array().map(|a| a.len()).unwrap_or(0),
+        2,
+        "should have added both projects"
+    );
+    assert!(
+        body["added"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str() == Some(pid_b)),
+        "project-b should be added"
+    );
 
     // --- Remove project B from registry ---
     let mut registry = ProjectRegistry::load(&reg_dir);
@@ -410,7 +420,9 @@ async fn test_admin_refresh_removes_deleted_project() {
     assert_eq!(resp.status(), 200, "second refresh should succeed");
     let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
 
-    let removed = body["removed"].as_array().expect("response should have 'removed' array");
+    let removed = body["removed"]
+        .as_array()
+        .expect("response should have 'removed' array");
     assert!(
         removed.iter().any(|v| v.as_str() == Some(pid_b)),
         "project-b should be in removed list, got: {:?}",
@@ -419,13 +431,18 @@ async fn test_admin_refresh_removes_deleted_project() {
 
     // No new adds after second refresh
     assert!(
-        body["added"].as_array().map(|a| a.is_empty()).unwrap_or(false),
+        body["added"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(false),
         "should have no new additions after removing project-b, got: {:?}",
         body["added"]
     );
 
     // Project A should still be present (already_loaded)
-    let already = body["already_loaded"].as_array().expect("response should have 'already_loaded' array");
+    let already = body["already_loaded"]
+        .as_array()
+        .expect("response should have 'already_loaded' array");
     assert!(
         already.iter().any(|v| v.as_str() == Some(pid_a)),
         "project-a should be in already_loaded, got: {:?}",
@@ -455,7 +472,7 @@ async fn test_admin_refresh_reports_failure_reason() {
     std::env::set_var("USERPROFILE", &home);
     std::env::set_var("HOME", &home);
 
-    let reg_dir = home.join(".codex-opencode-adapter");
+    let reg_dir = home.join(".codex-mimo-adapter");
     std::fs::create_dir_all(&reg_dir).unwrap();
 
     let (upstream_a, _mock_a, _recv_a) = start_mock_upstream().await;
@@ -468,11 +485,11 @@ async fn test_admin_refresh_reports_failure_reason() {
     std::fs::write(
         proj_a_root.join(PROJECT_ENV_FILENAME),
         format!(
-            "OPENCODE_GO_API_KEY=key-a\nCODEX_OPENCODE_LOCAL_TOKEN=raw-token-a\n             CODEX_OPENCODE_PROJECT_ID={pid_a}\n             OPENCODE_GO_BASE_URL=http://127.0.0.1:{port}\n             CODEX_OPENCODE_STATE_DB=.codex-opencode/state.sqlite\n             CODEX_OPENCODE_HOST=127.0.0.1\nCODEX_OPENCODE_PORT=4010\n",
+            "MIMO_API_KEY=key-a\nCODEX_MIMO_LOCAL_TOKEN=raw-token-a\n             CODEX_MIMO_PROJECT_ID={pid_a}\n             MIMO_API_BASE_URL=http://127.0.0.1:{port}\n             CODEX_MIMO_STATE_DB=.codex-mimo/state.sqlite\n             CODEX_MIMO_HOST=127.0.0.1\nCODEX_MIMO_PORT=4010\n",
             port = upstream_a.port()
         ),
     ).unwrap();
-    std::fs::create_dir_all(proj_a_root.join(".codex-opencode")).unwrap();
+    std::fs::create_dir_all(proj_a_root.join(".codex-mimo")).unwrap();
 
     // --- Registry with A (valid) and C (no env file / non-existent root) ---
     let mut registry = ProjectRegistry::load(&reg_dir);
@@ -504,13 +521,19 @@ async fn test_admin_refresh_reports_failure_reason() {
 
     let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
 
-    // startup project ("opencode_adapter_{pid_a}") is removed by refresh,
+    // startup project ("mimo_adapter_{pid_a}") is removed by refresh,
     // then "project-a" is added from registry
     let _added = body["added"].as_array().unwrap();
     let _already = body["already_loaded"].as_array().unwrap();
     // C should be in the failed list
-    let failed = body["failed"].as_array().expect("response should have 'failed' array");
-    assert_eq!(failed.len(), 1, "should have one failed entry, got {failed:?}");
+    let failed = body["failed"]
+        .as_array()
+        .expect("response should have 'failed' array");
+    assert_eq!(
+        failed.len(),
+        1,
+        "should have one failed entry, got {failed:?}"
+    );
 
     let entry = &failed[0];
     assert_eq!(

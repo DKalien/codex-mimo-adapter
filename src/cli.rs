@@ -1,8 +1,8 @@
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[command(name = "codex-opencode-adapter")]
-#[command(about = "OpenCode Go adapter and project initializer for Codex")]
+#[command(name = "codex-mimo-adapter")]
+#[command(about = "MiMo API adapter and project initializer for Codex")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -28,7 +28,7 @@ pub struct InitArgs {
     #[arg(long, default_value_t = 4010)]
     pub port: u16,
 
-    #[arg(long, default_value = "https://opencode.ai/zen/go/v1")]
+    #[arg(long, default_value = "https://token-plan-cn.xiaomimimo.com/v1")]
     pub upstream_base: String,
 }
 
