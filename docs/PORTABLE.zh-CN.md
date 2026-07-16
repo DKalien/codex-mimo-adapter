@@ -38,10 +38,10 @@
 ### 在 CI 中生成包（推荐）
 
 1. 提交并推送需要发布的代码。
-2. 在 GitHub Actions 手动运行 `Windows Runtime` 工作流；或者推送匹配 `v*` 的标签来触发它。
+2. 若只需 Artifact，可在 GitHub Actions 手动运行 `Windows Runtime` 工作流；手动运行不会创建 GitHub Release。若需发布，请推送与 `Cargo.toml` 中 `version` 完全匹配的 `v<version>` 标签，例如 `v0.2.0`。
 3. 等待 `Build Windows x64 runtime` 成功。
-4. 下载 artifact `codex-mimo-adapter-windows-x64-<提交号>`，它就是应交付给普通用户的组合包。
-5. 将该组合包交付给用户；如要创建 GitHub Release，请由发布者将下载的组合包作为 Release 附件上传。当前工作流上传 Artifact，不会自动创建 Release。
+4. 所有运行都会上传 artifact `codex-mimo-adapter-windows-x64-<提交号>`。标签运行还会创建或更新对应的 GitHub Release，并上传 `codex-mimo-adapter-windows-x64-v<version>.zip`。
+5. Release ZIP 保留 `codex-mimo-adapter-windows-x64/` 根目录；解压后从该目录运行 `CodexMiMoLauncher.exe`。
 
 CI 使用 Windows runner、Rust 和 .NET 8 SDK 构建：核心 Rust 适配器、单文件且自包含的 `CodexMiMoLauncher.exe`、以及带 SHA-256 的 runtime manifest。发布前应解压一次组合包并按前述六步做一次冒烟验证。
 

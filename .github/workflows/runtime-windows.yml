@@ -13,7 +13,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-runtime:
@@ -21,6 +21,19 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate release tag
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cargoToml = Get-Content -LiteralPath 'Cargo.toml' -Raw
+          if ($cargoToml -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
+            throw 'Could not read package version from Cargo.toml.'
+          }
+          $expectedTag = "v$($Matches[1])"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Tag '$env:GITHUB_REF_NAME' must equal '$expectedTag'."
+          }
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
@@ -99,6 +112,41 @@ jobs:
           $actual = (Get-FileHash -LiteralPath (Join-Path $runtime $manifest.adapter.file) -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $manifest.adapter.sha256) { throw 'Combined runtime SHA-256 does not match manifest.' }
           Write-Host "Combined package verified: $combined"
+      - name: Archive combined release package
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path (Resolve-Path 'dist') "codex-mimo-adapter-windows-x64-$env:GITHUB_REF_NAME.zip"
+          Push-Location 'dist'
+          try {
+            Compress-Archive -LiteralPath 'codex-mimo-adapter-windows-x64' -DestinationPath $archive -Force
+          } finally {
+            Pop-Location
+          }
+          if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
+            throw "Release archive was not created: $archive"
+          }
+      - name: Publish Windows package to GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          $asset = Join-Path (Resolve-Path 'dist') "codex-mimo-adapter-windows-x64-$tag.zip"
+
+          & gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            & gh release upload $tag $asset --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            & gh release create $tag $asset --verify-tag --generate-notes --title "codex-mimo-adapter $tag" --repo $env:GITHUB_REPOSITORY
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release publish failed for $tag."
+          }
       - name: Upload end-user Windows x64 package
         uses: actions/upload-artifact@v4
         with:
