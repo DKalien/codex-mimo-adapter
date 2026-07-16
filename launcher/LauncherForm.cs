@@ -158,6 +158,8 @@ internal sealed class LauncherForm : Form
             var startInfo = CreateCoreStartInfo("run");
             startInfo.Environment["MIMO_API_KEY"] = apiKey;
             var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+            process.OutputDataReceived += (_, e) => AppendLog("core", e.Data, null, _apiKey.Text.Trim());
+            process.ErrorDataReceived += (_, e) => AppendLog("core", null, e.Data, _apiKey.Text.Trim());
             process.Exited += AdapterExited;
             if (!process.Start())
             {
@@ -339,8 +341,6 @@ internal sealed class LauncherForm : Form
             RedirectStandardError = true,
         };
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
-        info.OutputDataReceived += (_, e) => AppendLog("core", e.Data, null, _apiKey.Text.Trim());
-        info.ErrorDataReceived += (_, e) => AppendLog("core", null, e.Data, _apiKey.Text.Trim());
         return info;
     }
 
