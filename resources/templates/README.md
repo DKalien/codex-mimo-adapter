@@ -1,6 +1,6 @@
-# resources/templates — Canonical OSS agent templates
+# resources/templates — Canonical managed agent templates
 
-This directory holds the canonical copy of every OSS subagent configuration template shipped with codex-mimo-adapter.
+This directory holds the canonical copy of every managed subagent configuration template shipped with codex-mimo-adapter.
 
 ## Purpose
 
@@ -12,16 +12,21 @@ This directory holds the canonical copy of every OSS subagent configuration temp
 
 | File | Agent | Model | Reasoning effort |
 |---|---|---|---|
-| oss-flash.toml | oss_flash | mimo/deepseek-v4-flash | medium |
-| oss-mimo.toml | oss_mimo | mimo/mimo-v2.5 | medium |
-| oss-minimax.toml | oss_minimax | mimo/minimax-m3 | high |
-| oss-pro.toml | oss_pro | mimo/deepseek-v4-pro | high |
+| default.toml | default | mimo/mimo-v2.5 | high |
+| explorer.toml | explorer | mimo/mimo-v2.5 | high |
+| oss-worker-pro-1.toml | oss_worker_pro_analysis | mimo/mimo-v2.5-pro | high |
+| oss-worker-pro-2.toml | oss_worker_pro_implementation | mimo/mimo-v2.5-pro | high |
+| oss-worker-pro-3.toml | oss_worker_pro_review | mimo/mimo-v2.5-pro | high |
+| oss-worker-std-1.toml | oss_worker_std_implementation | mimo/mimo-v2.5 | high |
+| oss-worker-std-2.toml | oss_worker_std_test | mimo/mimo-v2.5 | high |
+| oss-worker-std-3.toml | oss_worker_std_docs | mimo/mimo-v2.5 | high |
+| worker.toml | worker | mimo/mimo-v2.5 | high |
 
 ## Usage from Rust
 
 ```rust
 // Embed a template at compile time:
-pub const OSS_FLASH_TOML: &str = include_str!("templates/oss-flash.toml");
+pub const DEFAULT_TOML: &str = include_str!("templates/default.toml");
 ```
 
 All files use UTF-8 encoding.

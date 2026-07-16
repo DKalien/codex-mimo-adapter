@@ -22,7 +22,7 @@
     Defaults to https://token-plan-cn.xiaomimimo.com/v1
 
 .PARAMETER NoInit
-    Skip the init step (useful when .env already exists).
+    Skip the init step, including automatic migration of legacy agent files.
 
 .PARAMETER ConfigureOnly
     Initialize the adapter and install global Codex configuration, then exit
@@ -44,6 +44,58 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+$ManagedAgentFiles = @(
+    "default.toml",
+    "explorer.toml",
+    "oss-worker-pro-1.toml",
+    "oss-worker-pro-2.toml",
+    "oss-worker-pro-3.toml",
+    "oss-worker-std-1.toml",
+    "oss-worker-std-2.toml",
+    "oss-worker-std-3.toml",
+    "worker.toml"
+)
+$LegacyManagedAgentFiles = @(
+    "oss-flash.toml",
+    "oss-mimo.toml",
+    "oss-minimax.toml",
+    "oss-pro.toml"
+)
+
+function Test-ManagedProjectAgentsCurrent {
+    param([string]$AgentsDirectory)
+
+    if (-not (Test-Path -LiteralPath $AgentsDirectory -PathType Container)) {
+        return $false
+    }
+    foreach ($agentFile in $ManagedAgentFiles) {
+        if (-not (Test-Path -LiteralPath (Join-Path $AgentsDirectory $agentFile) -PathType Leaf)) {
+            return $false
+        }
+    }
+    foreach ($legacyFile in $LegacyManagedAgentFiles) {
+        if (Test-Path -LiteralPath (Join-Path $AgentsDirectory $legacyFile) -PathType Leaf) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Get-ProjectEnvironmentSettings {
+    param([string]$Path)
+
+    $settings = @{}
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $settings
+    }
+    Get-Content -LiteralPath $Path | ForEach-Object {
+        if ($_ -notmatch '=') { return }
+        $key, $value = $_ -split '=', 2
+        $settings[$key.Trim()] = $value.Trim()
+    }
+    return $settings
+}
 
 $packageDir = Split-Path -Parent $PSScriptRoot
 $exePath    = Join-Path $packageDir "codex-mimo-adapter.exe"
@@ -78,20 +130,47 @@ foreach ($kv in $envVars.GetEnumerator()) {
     [Environment]::SetEnvironmentVariable($kv.Key, $kv.Value, "Process")
 }
 
-# ── Run init if not already initialized ──────────────────────────────
+# ── Run init for first setup or managed-agent migration ──────────────
 $projectEnvPath = Join-Path $packageDir ".codex-mimo-adapter.env"
-if ((-not $NoInit) -and (-not (Test-Path -LiteralPath $projectEnvPath))) {
-    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        # Try to read from .env
-        $ApiKey = $envVars["MIMO_API_KEY"]
+$projectAgentsDir = Join-Path $packageDir ".codex\agents"
+$projectAlreadyInitialized = Test-Path -LiteralPath $projectEnvPath -PathType Leaf
+$managedAgentsCurrent = Test-ManagedProjectAgentsCurrent -AgentsDirectory $projectAgentsDir
+$shouldRunInit = (-not $NoInit) -and ((-not $projectAlreadyInitialized) -or (-not $managedAgentsCurrent))
+
+if ($shouldRunInit) {
+    $existingProjectSettings = Get-ProjectEnvironmentSettings -Path $projectEnvPath
+    $usesProcessApiKey = $existingProjectSettings["CODEX_MIMO_API_KEY_SOURCE"] -eq "process"
+    if ($usesProcessApiKey) {
+        if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+            $ApiKey = $envVars["MIMO_API_KEY"]
+        }
+        if ([string]::IsNullOrWhiteSpace($ApiKey) -or $ApiKey -eq "your-mimo-token-plan-api-key") {
+            throw "MIMO_API_KEY is required to migrate this process-inherited API key configuration. Pass -ApiKey or set MIMO_API_KEY in .env."
+        }
+    } else {
+        if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+            $ApiKey = $existingProjectSettings["MIMO_API_KEY"]
+        }
+        if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+            $ApiKey = $envVars["MIMO_API_KEY"]
+        }
+        if ([string]::IsNullOrWhiteSpace($ApiKey) -or $ApiKey -eq "your-mimo-token-plan-api-key") {
+            throw "API key is required on first run. Pass -ApiKey or set MIMO_API_KEY in .env."
+        }
     }
-    if ([string]::IsNullOrWhiteSpace($ApiKey) -or $ApiKey -eq "your-mimo-token-plan-api-key") {
-        throw "API key is required on first run. Pass -ApiKey or set MIMO_API_KEY in .env."
+
+    if ($projectAlreadyInitialized) {
+        Write-Host "Migrating managed agent definitions ..."
+    } else {
+        Write-Host "Initializing project ..."
     }
-    Write-Host "Initializing project ..."
     Push-Location $packageDir
     try {
-        & $exePath init --api-key $ApiKey --host $ListenHost --port $Port --upstream-base $UpstreamBase
+        if ($usesProcessApiKey) {
+            $ApiKey | & $exePath init --api-key-stdin --host $ListenHost --port $Port --upstream-base $UpstreamBase
+        } else {
+            & $exePath init --api-key $ApiKey --host $ListenHost --port $Port --upstream-base $UpstreamBase
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "init failed with exit code $LASTEXITCODE."
         }
@@ -99,7 +178,7 @@ if ((-not $NoInit) -and (-not (Test-Path -LiteralPath $projectEnvPath))) {
         Pop-Location
     }
 } else {
-    Write-Host "Project already initialized (or -NoInit specified). Skipping init."
+    Write-Host "Project and managed agent definitions are current (or -NoInit specified). Skipping init."
 }
 
 if (-not (Test-Path -LiteralPath $projectEnvPath)) {
@@ -107,12 +186,7 @@ if (-not (Test-Path -LiteralPath $projectEnvPath)) {
 }
 
 # ── Install globally routed agent definitions ────────────────────────
-$projectSettings = @{}
-Get-Content -LiteralPath $projectEnvPath | ForEach-Object {
-    if ($_ -notmatch '=') { return }
-    $key, $value = $_ -split '=', 2
-    $projectSettings[$key.Trim()] = $value.Trim()
-}
+$projectSettings = Get-ProjectEnvironmentSettings -Path $projectEnvPath
 $projectId = $projectSettings["CODEX_MIMO_PROJECT_ID"]
 if ([string]::IsNullOrWhiteSpace($projectId)) {
     throw "CODEX_MIMO_PROJECT_ID is missing from $projectEnvPath."
@@ -154,17 +228,21 @@ if ($updatedGlobalConfig -eq $globalConfig) {
 
 New-Item -ItemType Directory -Path $globalAgentDir -Force | Out-Null
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-Get-ChildItem -LiteralPath $agentTemplateDir -Filter "*.toml" -File | ForEach-Object {
-    $content = Get-Content -LiteralPath $_.FullName -Raw
+foreach ($agentFile in $ManagedAgentFiles) {
+    $sourcePath = Join-Path $agentTemplateDir $agentFile
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "Managed agent template is missing: $sourcePath"
+    }
+    $content = Get-Content -LiteralPath $sourcePath -Raw
     $routed = [regex]::Replace(
         $content,
         'mimo_adapter/[0-9a-fA-F]{12}/mimo/',
         "mimo_adapter/$projectKey/mimo/"
     )
     if ($routed -eq $content -and $content -match 'model_provider\s*=\s*"mimo_adapter"') {
-        throw "Could not rewrite the project route in $($_.FullName)."
+        throw "Could not rewrite the project route in $sourcePath."
     }
-    $targetPath = Join-Path $globalAgentDir $_.Name
+    $targetPath = Join-Path $globalAgentDir $agentFile
     [System.IO.File]::WriteAllText($targetPath, $routed, $utf8NoBom)
 }
 Write-Host "Installed globally routed Codex agents in $globalAgentDir"

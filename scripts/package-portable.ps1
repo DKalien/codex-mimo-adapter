@@ -39,6 +39,18 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+$ManagedAgentFiles = @(
+    "default.toml",
+    "explorer.toml",
+    "oss-worker-pro-1.toml",
+    "oss-worker-pro-2.toml",
+    "oss-worker-pro-3.toml",
+    "oss-worker-std-1.toml",
+    "oss-worker-std-2.toml",
+    "oss-worker-std-3.toml",
+    "worker.toml"
+)
+
 function Test-PortableTextFile {
     param([System.IO.FileInfo]$File)
 
@@ -276,10 +288,15 @@ Copy-Item -LiteralPath $exePath -Destination (Join-Path $stagingDir "codex-mimo-
 Copy-Item -LiteralPath (Join-Path $repoRoot ".env.example")        -Destination (Join-Path $stagingDir ".env.example")
 Copy-Item -LiteralPath (Join-Path $repoRoot "config.toml.example") -Destination (Join-Path $stagingDir "config.toml.example")
 
-# Global agent templates.  start-portable.ps1 rewrites the project route for
-# the target machine before installing these under the user's Codex home.
-Get-ChildItem -LiteralPath (Join-Path $repoRoot ".codex\agents") -Filter "*.toml" -File | ForEach-Object {
-    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stagingDir "agents\$($_.Name)")
+# Global agent templates. start-portable.ps1 rewrites their project route for
+# the target machine before installing this exact managed set under Codex home.
+$repoAgentDir = Join-Path $repoRoot ".codex\agents"
+foreach ($agentFile in $ManagedAgentFiles) {
+    $sourcePath = Join-Path $repoAgentDir $agentFile
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "Managed agent template is missing: $sourcePath"
+    }
+    Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $stagingDir "agents\$agentFile")
 }
 
 # Deployment scripts for the target machine

@@ -4,16 +4,16 @@
 #
 # Reference: https://developers.openai.com/codex/subagents
 
-name = "oss_mimo"
-description = "MiMo worker for simple multimodal tasks and lightweight implementation."
+name = "oss_worker_std_docs"
+description = "MiMo standard worker for documentation, text processing, and lightweight maintenance."
 model_provider = "mimo_adapter"
 model = "mimo/mimo-v2.5"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 
 developer_instructions = """
 Follow the parent task exactly. Read repository instructions first.
-Use this worker for simple multimodal tasks, image-aware checks, and lightweight bounded implementation. If no visual material is involved, do not assume this worker should handle the main text task by default.
+Use this worker for documentation, text processing, and lightweight maintenance.
 Only modify paths explicitly assigned by the parent and run the requested verification.
 Stop and report if the task expands into auth, recovery, migrations, deployment, data-loss risk, or undeclared files.
 Prefer concise, decision-useful conclusions and avoid long reasoning, full-file dumps, or large logs unless explicitly requested.

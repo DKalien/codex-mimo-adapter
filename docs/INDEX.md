@@ -15,7 +15,7 @@ Also see:
 
 | Path | Purpose |
 |---|---|
-| [resources/templates/](../resources/templates/README.md) | Canonical OSS agent template files (embedded by the binary at compile time). |
+| [resources/templates/](../resources/templates/README.md) | Canonical managed agent template files (embedded by the binary at compile time). |
 
 Normal use:
 

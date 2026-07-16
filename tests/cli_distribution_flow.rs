@@ -4,12 +4,74 @@ use axum::{Json, Router};
 use codex_mimo_adapter::config::{Config, ConfigOverrides};
 use codex_mimo_adapter::project::read_project_env;
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
 use uuid::Uuid;
+
+const MANAGED_AGENT_FILES: [&str; 9] = [
+    "default.toml",
+    "explorer.toml",
+    "oss-worker-pro-1.toml",
+    "oss-worker-pro-2.toml",
+    "oss-worker-pro-3.toml",
+    "oss-worker-std-1.toml",
+    "oss-worker-std-2.toml",
+    "oss-worker-std-3.toml",
+    "worker.toml",
+];
+
+const LEGACY_MANAGED_AGENT_FILES: [&str; 4] = [
+    "oss-flash.toml",
+    "oss-mimo.toml",
+    "oss-minimax.toml",
+    "oss-pro.toml",
+];
+
+const MANAGED_AGENT_REGISTRATIONS: [(&str, &str); 9] = [
+    ("default", "default.toml"),
+    ("explorer", "explorer.toml"),
+    ("oss_worker_pro_analysis", "oss-worker-pro-1.toml"),
+    ("oss_worker_pro_implementation", "oss-worker-pro-2.toml"),
+    ("oss_worker_pro_review", "oss-worker-pro-3.toml"),
+    ("oss_worker_std_implementation", "oss-worker-std-1.toml"),
+    ("oss_worker_std_test", "oss-worker-std-2.toml"),
+    ("oss_worker_std_docs", "oss-worker-std-3.toml"),
+    ("worker", "worker.toml"),
+];
+
+#[test]
+fn config_example_registers_exactly_the_managed_agents() {
+    let source =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("config.toml.example"))
+            .expect("config.toml.example must exist");
+    let document = source
+        .parse::<toml_edit::DocumentMut>()
+        .expect("config.toml.example must be valid TOML");
+    let agents = document["agents"]
+        .as_table()
+        .expect("config.toml.example must contain an agents table");
+    let actual: BTreeSet<_> = agents.iter().map(|(name, _)| name.to_string()).collect();
+    let expected: BTreeSet<_> = MANAGED_AGENT_REGISTRATIONS
+        .iter()
+        .map(|(name, _)| (*name).to_string())
+        .collect();
+    assert_eq!(
+        actual, expected,
+        "example must not expose legacy agent roles"
+    );
+
+    for (role, file) in MANAGED_AGENT_REGISTRATIONS {
+        let expected_path = format!(".codex/agents/{file}");
+        assert_eq!(
+            agents[role]["config_file"].as_str(),
+            Some(expected_path.as_str()),
+            "{role} must register its matching managed TOML"
+        );
+    }
+}
 
 #[test]
 fn init_writes_project_files_and_auth_prints_local_token() {
@@ -29,20 +91,39 @@ fn init_writes_project_files_and_auth_prints_local_token() {
         .to_string();
     assert!(token.starts_with("codex-mimo-"));
 
-    for name in [
-        "oss-flash.toml",
-        "oss-mimo.toml",
-        "oss-minimax.toml",
-        "oss-pro.toml",
-    ] {
+    let project_key = env_text
+        .lines()
+        .find_map(|line| line.strip_prefix("CODEX_MIMO_PROJECT_ID=mimo_adapter_"))
+        .expect("init must write a routed project ID");
+    let agents_dir = sandbox.project().join(".codex").join("agents");
+    let installed_agents: BTreeSet<_> = fs::read_dir(&agents_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    let expected_agents: BTreeSet<_> = MANAGED_AGENT_FILES
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect();
+    assert_eq!(
+        installed_agents, expected_agents,
+        "init must install exactly the managed agents"
+    );
+
+    for name in MANAGED_AGENT_FILES {
+        let text = fs::read_to_string(agents_dir.join(name)).unwrap();
         assert!(
-            sandbox
-                .project()
-                .join(".codex")
-                .join("agents")
-                .join(name)
-                .exists(),
-            "missing agent template: {name}"
+            text.contains("model_provider = \"mimo_adapter\""),
+            "{name} must use the mimo_adapter provider"
+        );
+        assert!(
+            text.contains(&format!("model = \"mimo_adapter/{project_key}/mimo/")),
+            "{name} must use the generated project route"
+        );
+    }
+    for name in LEGACY_MANAGED_AGENT_FILES {
+        assert!(
+            !agents_dir.join(name).exists(),
+            "legacy agent template must not be generated: {name}"
         );
     }
 
@@ -75,6 +156,38 @@ fn init_writes_project_files_and_auth_prints_local_token() {
     let external_auth_output = sandbox.run_in(&external_dir, ["auth", "print-local-token"]);
     assert_success(&external_auth_output);
     assert_eq!(stdout(&external_auth_output).trim(), signed_token);
+}
+
+#[test]
+fn init_replaces_only_legacy_managed_agents_and_preserves_custom_agents() {
+    let sandbox = TestSandbox::new("init-agent-migration");
+    let agents_dir = sandbox.project().join(".codex").join("agents");
+    fs::create_dir_all(&agents_dir).unwrap();
+    fs::write(agents_dir.join("oss-flash.toml"), "name = \"legacy\"\n").unwrap();
+    fs::write(
+        agents_dir.join("my-local-agent.toml"),
+        "name = \"my_local_agent\"\nmodel = \"custom/model\"\n",
+    )
+    .unwrap();
+
+    let output = sandbox.run(["init", "--api-key", "test-api-key"]);
+    assert_success(&output);
+
+    assert!(
+        !agents_dir.join("oss-flash.toml").exists(),
+        "known legacy adapter agent must be removed"
+    );
+    assert_eq!(
+        fs::read_to_string(agents_dir.join("my-local-agent.toml")).unwrap(),
+        "name = \"my_local_agent\"\nmodel = \"custom/model\"\n",
+        "init must not overwrite an unmanaged agent"
+    );
+    for name in MANAGED_AGENT_FILES {
+        assert!(
+            agents_dir.join(name).exists(),
+            "missing managed agent: {name}"
+        );
+    }
 }
 
 #[test]
@@ -421,13 +534,21 @@ fn dual_project_isolation() {
     assert_ne!(pid_a, pid_b, "each project must get unique project_id");
     assert_ne!(token_a, token_b, "each project must get unique local_token");
 
-    // Agent templates reference mimo_adapter (not project-specific)
-    for proj in [&proj_a, &proj_b] {
-        for name in ["oss-flash.toml", "oss-pro.toml"] {
+    // Agent templates use the shared provider and each project's route.
+    for (proj, project_id) in [(&proj_a, &pid_a), (&proj_b, &pid_b)] {
+        let project_key = project_id
+            .strip_prefix("mimo_adapter_")
+            .expect("project ID must have adapter prefix");
+        for name in ["default.toml", "oss-worker-pro-3.toml", "worker.toml"] {
             let text = fs::read_to_string(proj.join(".codex").join("agents").join(name)).unwrap();
             assert!(
                 text.contains("model_provider = \"mimo_adapter\""),
                 "{}/agents/{name} must use fixed provider",
+                proj.display()
+            );
+            assert!(
+                text.contains(&format!("model = \"mimo_adapter/{project_key}/mimo/")),
+                "{}/agents/{name} must use its project route",
                 proj.display()
             );
         }

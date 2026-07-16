@@ -16,7 +16,7 @@
 cargo install --path .
 ```
 
-2. 初始化配置（安装用户级 Provider + 写入项目配置 + 写入默认 OSS agent 模板）：
+2. 初始化配置（安装用户级 Provider + 写入项目配置 + 写入 9 个受管理 agent）：
 
 ```powershell
 codex-mimo-adapter init --api-key "<你的 MiMo Token Plan API Key>"
@@ -58,12 +58,12 @@ cargo run -- start
 |---|---|---|
 | `model_providers.mimo_adapter` | `%USERPROFILE%\.codex\config.toml` | 注册 Codex 可调用的模型服务 |
 | `.codex-mimo-adapter.env` | 当前项目根目录 | 保存项目级 API Key、项目 ID、本地 token、SQLite 路径 |
-| Agent TOML | 项目 `.codex\agents\*.toml` | 定义 `oss_flash`、`oss_pro` 等子代理，并把 `model` 写成带项目路由的格式 |
+| Agent TOML | 项目 `.codex\agents\*.toml` | 定义 9 个受管理子代理，并把 `model` 写成带项目路由的格式 |
 
 Codex 会扫描项目级 Agent TOML，但会忽略项目 `.codex/config.toml` 中的
 `model_providers`。配置放错时会出现：
 
-- 工具描述能够看到 `oss_flash`；
+- 工具描述能够看到 `oss_worker_std_implementation`；
 - 启动时却报 `agent type is currently not available`；
 - Bridge 完全收不到请求。
 
@@ -81,7 +81,7 @@ codex-mimo-adapter init --api-key "<你的 MiMo Token Plan API Key>"
 
 - 更新 `%USERPROFILE%\.codex\config.toml` 中的 `model_providers.mimo_adapter`
 - 创建或覆盖当前项目的 `.codex-mimo-adapter.env`
-- 创建或覆盖默认 OSS agent 模板到 `.codex/agents/`
+- 创建或覆盖以下 9 个受管理 agent 到 `.codex/agents/`：`default`、`explorer`、`worker`、3 个 `oss_worker_pro_*` 与 3 个 `oss_worker_std_*`；不会覆盖其他用户自建的 agent 文件
 - 把 agent `model` 写成 `mimo_adapter/<project_key>/mimo/<model-id>`
 
 其中本地 token 会按项目生成并落盘到 `.codex-mimo-adapter.env`，后续可手动修改。
@@ -160,17 +160,18 @@ Invoke-RestMethod http://127.0.0.1:4010/v1/models -Headers @{Authorization = "Be
 1. 完全关闭并重新打开 Codex Desktop。
 2. 打开 `D:\AI-Tools\codex-mimo-adapter`。
 3. 确认可用角色包含：
-   - `oss_flash`
-   - `oss_mimo`
-   - `oss_minimax`
-   - `oss_pro`
+   - `default`
+   - `explorer`
+   - `worker`
+   - `oss_worker_pro_analysis`、`oss_worker_pro_implementation`、`oss_worker_pro_review`
+   - `oss_worker_std_implementation`、`oss_worker_std_test`、`oss_worker_std_docs`
 
-如果仍是 `oss_flash_support`、`oss_kimi_rapid` 或 `oss_*_investigator`，说明
+如果仍是旧的 `oss_flash`、`oss_mimo`、`oss_minimax` 或 `oss_pro`，说明
 打开的是旧项目或旧配置仍在生效。
 
 ## 6. 第一次低 Token 验收
 
-只启动一次 `oss_flash`，不要并发，不要重试：
+只启动一次 `oss_worker_std_test`，不要并发，不要重试：
 
 ```text
 只读 pyproject.toml，回答项目名。不要读取其他文件，不要修改文件。只输出项目名。
@@ -190,10 +191,15 @@ codex-mimo-adapter
 
 | 角色 | 上游模型 | Sandbox | 适用场景 |
 |---|---|---|---|
-| `oss_flash` | MiMo V2.5 | workspace-write | 简单文本任务与轻量修改 |
-| `oss_mimo` | MiMo V2.5 | workspace-write | 简单多模态任务与轻量实现 |
-| `oss_minimax` | MiMo V2.5 | workspace-write | 截图、界面与其他偏视觉任务 |
-| `oss_pro` | MiMo V2.5 Pro | workspace-write | 复杂文本分析、审查与实现 |
+| `default` | MiMo V2.5 | workspace-write | 通用后备角色 |
+| `explorer` | MiMo V2.5 | read-only | 只读探索与验证 |
+| `worker` | MiMo V2.5 | workspace-write | 通用受限实现 |
+| `oss_worker_pro_analysis` | MiMo V2.5 Pro | workspace-write | 复杂分析与架构权衡 |
+| `oss_worker_pro_implementation` | MiMo V2.5 Pro | workspace-write | 复杂实现与集成 |
+| `oss_worker_pro_review` | MiMo V2.5 Pro | read-only | 独立审查与验证 |
+| `oss_worker_std_implementation` | MiMo V2.5 | workspace-write | 受限实现与多模态任务 |
+| `oss_worker_std_test` | MiMo V2.5 | workspace-write | 测试与验证 |
+| `oss_worker_std_docs` | MiMo V2.5 | workspace-write | 文档与轻量维护 |
 
 调查、实现、审查等职责由父 Codex 每次派工决定。Bridge 不派工、不执行工具，
 也不判断任务是否完成。
@@ -335,4 +341,4 @@ $headers = @{ Authorization = "Bearer $token" }
 - [Documentation index](INDEX.md)
 - [Codex Subagents](https://developers.openai.com/codex/subagents)
 - [Codex Configuration Reference](https://developers.openai.com/codex/config-reference)
-- [resources/templates/](../resources/templates/) — Canonical OSS agent template files
+- [resources/templates/](../resources/templates/) — Canonical managed agent template files

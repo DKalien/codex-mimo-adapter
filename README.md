@@ -76,7 +76,7 @@ Or use the repo-local helper:
 
 ### Agent templates and model routing
 
-`init` writes OSS subagent templates into `.codex/agents/` with a routed model format:
+`init` writes the nine managed subagent templates into `.codex/agents/` with a routed model format:
 
 | Field | Value | Example |
 |---|---|---|

@@ -84,10 +84,17 @@ codex-mimo-adapter-{version}-windows-x64/
    .\scripts\start-portable.ps1 -ApiKey "your-mimo-token-plan-api-key"
    ```
 
-   On subsequent runs (when `.codex-mimo-adapter.env` already exists):
+   On subsequent runs, use the same command without `-ApiKey`; the script
+   reuses the saved project key:
    ```powershell
-   .\scripts\start-portable.ps1 -NoInit
+   .\scripts\start-portable.ps1
    ```
+
+   Each run checks the project `.codex/agents` directory. If it finds a
+   legacy four-agent installation or a missing managed agent, it reruns `init`
+   once to migrate to the current nine-agent set while preserving whether the
+   existing key was project-stored or process-inherited. `-NoInit` explicitly
+   disables both first-time initialization and this migration check.
 
    The first run also installs the routed agent definitions into
    `%USERPROFILE%\.codex\agents`, so they are available to every Codex project

@@ -10,6 +10,25 @@ namespace CodexMiMoLauncher;
 internal sealed class LauncherForm : Form
 {
     private const string DefaultHealthUrl = "http://127.0.0.1:4010/health";
+    private static readonly string[] ManagedAgentFiles =
+    {
+        "default.toml",
+        "explorer.toml",
+        "worker.toml",
+        "oss-worker-pro-1.toml",
+        "oss-worker-pro-2.toml",
+        "oss-worker-pro-3.toml",
+        "oss-worker-std-1.toml",
+        "oss-worker-std-2.toml",
+        "oss-worker-std-3.toml",
+    };
+    private static readonly string[] LegacyAgentFiles =
+    {
+        "oss-flash.toml",
+        "oss-mimo.toml",
+        "oss-minimax.toml",
+        "oss-pro.toml",
+    };
     private readonly TextBox _apiKey = new() { UseSystemPasswordChar = true, Width = 242 };
     private readonly Label _status = new() { AutoSize = false, Height = 38, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
     private readonly Label _runtime = new() { AutoSize = false, Height = 24, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DimGray };
@@ -28,6 +47,9 @@ internal sealed class LauncherForm : Form
     private RuntimeValidation _runtimeValidation;
     private bool _busy;
     private bool _exitRequested;
+    // This is set before StopAsync reaches its first await. It prevents the Exited callback
+    // from disposing the same Process object while StopAsync is still awaiting it.
+    private Process? _stoppingAdapter;
 
     public LauncherForm()
     {
@@ -143,9 +165,10 @@ internal sealed class LauncherForm : Form
         try
         {
             SaveKey();
-            if (!File.Exists(_paths.ProjectEnvironmentFile))
+            var initializationStatus = GetInitializationStatus();
+            if (initializationStatus is not null)
             {
-                SetStatus("首次使用：正在初始化项目配置…", Color.DimGray);
+                SetStatus(initializationStatus, Color.DimGray);
                 var initialized = await RunInitializationAsync(apiKey);
                 if (!initialized) return;
             }
@@ -183,6 +206,30 @@ internal sealed class LauncherForm : Form
         }
     }
 
+    private string? GetInitializationStatus()
+    {
+        if (!File.Exists(_paths.ProjectEnvironmentFile))
+            return "首次使用：正在初始化项目配置…";
+
+        var agentsDirectory = Path.Combine(_paths.RepositoryRoot.FullName, ".codex", "agents");
+        var missingManagedFiles = ManagedAgentFiles
+            .Where(fileName => !File.Exists(Path.Combine(agentsDirectory, fileName)))
+            .ToArray();
+        var legacyFiles = LegacyAgentFiles
+            .Where(fileName => File.Exists(Path.Combine(agentsDirectory, fileName)))
+            .ToArray();
+
+        if (missingManagedFiles.Length == 0 && legacyFiles.Length == 0)
+            return null;
+
+        var details = new List<string>();
+        if (missingManagedFiles.Length > 0)
+            details.Add($"缺少 {missingManagedFiles.Length} 个九模板配置");
+        if (legacyFiles.Length > 0)
+            details.Add($"检测到 {legacyFiles.Length} 个旧版配置");
+        return $"正在升级子代理配置（{string.Join("；", details)}）…";
+    }
+
     private async Task<bool> RunInitializationAsync(string apiKey)
     {
         var startInfo = CreateCoreStartInfo("init", "--api-key-stdin");
@@ -215,40 +262,58 @@ internal sealed class LauncherForm : Form
         }
     }
 
-    private async Task StopAsync()
+    private async Task<bool> StopAsync()
     {
-        if (_adapter is null || _adapter.HasExited)
+        var adapter = _adapter;
+        if (adapter is null)
         {
-            _adapter = null;
             _stop.Enabled = _restart.Enabled = false;
             await RefreshStatusAsync();
-            return;
+            return true;
         }
+        if (adapter.HasExited)
+        {
+            ReleaseAdapter(adapter);
+            await RefreshStatusAsync();
+            return true;
+        }
+
         SetBusy(true);
+        _stoppingAdapter = adapter;
         try
         {
             SetStatus("正在关闭由启动器管理的适配器…", Color.DimGray);
-            _adapter.Kill(entireProcessTree: true);
-            await _adapter.WaitForExitAsync();
-            _adapter.Dispose();
-            _adapter = null;
-            _stop.Enabled = _restart.Enabled = false;
+            try
+            {
+                adapter.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException) when (adapter.HasExited)
+            {
+                // The core exited between the initial check and Kill; it is already stopped.
+            }
+            await adapter.WaitForExitAsync();
             SetStatus("适配器已关闭。", Color.DimGray);
+            return true;
         }
         catch (Exception ex)
         {
             SetStatus($"关闭失败：{ReadableError(ex)}", Color.Firebrick);
+            return false;
         }
         finally
         {
+            if (HasExited(adapter))
+                ReleaseAdapter(adapter);
+            else if (ReferenceEquals(_stoppingAdapter, adapter))
+                _stoppingAdapter = null;
             SetBusy(false);
         }
     }
 
     private async Task RestartAsync()
     {
-        await StopAsync();
-        await StartAsync();
+        if (await StopAsync())
+            await StartAsync();
     }
 
     private async Task CheckAsync()
@@ -399,17 +464,43 @@ internal sealed class LauncherForm : Form
 
     private void AdapterExited(object? sender, EventArgs e)
     {
-        if (IsDisposed || Disposing) return;
-        BeginInvoke(() =>
+        if (sender is not Process exited || IsDisposed || Disposing || !IsHandleCreated) return;
+        try
         {
-            if (_adapter is { HasExited: true })
-            {
-                _adapter.Dispose();
-                _adapter = null;
-                _stop.Enabled = _restart.Enabled = false;
-                SetStatus("核心进程已退出。", Color.Firebrick);
-            }
-        });
+            BeginInvoke(() => HandleAdapterExited(exited));
+        }
+        catch (InvalidOperationException)
+        {
+            // The window was disposed after the checks above.
+        }
+    }
+
+    private void HandleAdapterExited(Process exited)
+    {
+        if (!ReferenceEquals(_adapter, exited) || ReferenceEquals(_stoppingAdapter, exited)) return;
+        ReleaseAdapter(exited);
+        SetStatus("核心进程已退出。", Color.Firebrick);
+    }
+
+    private void ReleaseAdapter(Process adapter)
+    {
+        if (ReferenceEquals(_adapter, adapter)) _adapter = null;
+        if (ReferenceEquals(_stoppingAdapter, adapter)) _stoppingAdapter = null;
+        adapter.Exited -= AdapterExited;
+        adapter.Dispose();
+        _stop.Enabled = _restart.Enabled = false;
+    }
+
+    private static bool HasExited(Process process)
+    {
+        try
+        {
+            return process.HasExited;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
     }
 
     private void SaveKey()
@@ -469,8 +560,15 @@ internal sealed class LauncherForm : Form
 
     private async Task ExitLauncherAsync()
     {
+        if (_exitRequested) return;
         _exitRequested = true;
-        await StopAsync();
+        _refreshTimer.Stop();
+        if (!await StopAsync())
+        {
+            _exitRequested = false;
+            _refreshTimer.Start();
+            return;
+        }
         Close();
     }
 
@@ -479,6 +577,19 @@ internal sealed class LauncherForm : Form
         Show();
         WindowState = FormWindowState.Normal;
         Activate();
+    }
+
+    internal void ActivateFromAnotherInstance()
+    {
+        if (IsDisposed || Disposing || !IsHandleCreated) return;
+        try
+        {
+            BeginInvoke((Action)RestoreFromTray);
+        }
+        catch (InvalidOperationException)
+        {
+            // The primary instance is shutting down; the second instance will exit normally.
+        }
     }
 
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
@@ -496,7 +607,8 @@ internal sealed class LauncherForm : Form
             _refreshTimer.Dispose();
             _tray.Dispose();
             _http.Dispose();
-            _adapter?.Dispose();
+            if (_adapter is { } adapter)
+                ReleaseAdapter(adapter);
         }
         base.Dispose(disposing);
     }

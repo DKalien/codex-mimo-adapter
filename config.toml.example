@@ -21,18 +21,40 @@ command = "codex-mimo-adapter"
 args = ["auth", "print-local-token"]
 timeout_ms = 5000
 
-[agents.oss_mimo]
-description = "MiMo Token Plan worker"
-config_file = ".codex/agents/oss-mimo.toml"
+# These entries match the nine files installed by `codex-mimo-adapter init`.
+# Keep this list aligned with resources/templates/ and .codex/agents/.
+[agents.default]
+description = "MiMo-backed general-purpose fallback subagent"
+config_file = ".codex/agents/default.toml"
 
-[agents.oss_flash]
-description = "Low-cost MiMo Token Plan Flash worker"
-config_file = ".codex/agents/oss-flash.toml"
+[agents.explorer]
+description = "MiMo-backed read-only explorer"
+config_file = ".codex/agents/explorer.toml"
 
-[agents.oss_minimax]
-description = "MiMo Token Plan multimodal worker"
-config_file = ".codex/agents/oss-minimax.toml"
+[agents.worker]
+description = "MiMo-backed bounded implementation worker"
+config_file = ".codex/agents/worker.toml"
 
-[agents.oss_pro]
-description = "MiMo Token Plan Pro worker"
-config_file = ".codex/agents/oss-pro.toml"
+[agents.oss_worker_pro_analysis]
+description = "MiMo Pro worker for complex analysis and architecture tradeoffs"
+config_file = ".codex/agents/oss-worker-pro-1.toml"
+
+[agents.oss_worker_pro_implementation]
+description = "MiMo Pro worker for complex implementation and integration"
+config_file = ".codex/agents/oss-worker-pro-2.toml"
+
+[agents.oss_worker_pro_review]
+description = "MiMo Pro read-only worker for independent review"
+config_file = ".codex/agents/oss-worker-pro-3.toml"
+
+[agents.oss_worker_std_implementation]
+description = "MiMo standard worker for bounded implementation and multimodal tasks"
+config_file = ".codex/agents/oss-worker-std-1.toml"
+
+[agents.oss_worker_std_test]
+description = "MiMo standard worker for focused tests and verification"
+config_file = ".codex/agents/oss-worker-std-2.toml"
+
+[agents.oss_worker_std_docs]
+description = "MiMo standard worker for documentation and lightweight maintenance"
+config_file = ".codex/agents/oss-worker-std-3.toml"
