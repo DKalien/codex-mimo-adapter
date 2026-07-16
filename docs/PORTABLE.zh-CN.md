@@ -15,6 +15,14 @@
 
 这条路径不需要安装 Rust、.NET SDK、PowerShell 或独立 Codex CLI。也**不能**用裸 `git clone`，更不能只下载 core-only runtime artifact：启动器、核心适配器和它们的 manifest 必须保持在同一个解压根目录内。
 
+### 开发设备：无感切换到 Release 核心
+
+如果此 Windows 用户已有一个可用的单项目适配器配置，Launcher 的“启动”会优先复用它：不会写入 Release 解压目录、不会添加项目注册表项、不会改写 `%USERPROFILE%\.codex\config.toml`，也不会保存或读取启动器自己的 API Key。它只用 Release 核心 EXE 启动已注册项目，因此可在停止开发实例后无感切换。
+
+共享启动要求现有注册表恰好有一个有效项目，项目环境文件中已有 API Key 和本地 Token，且 Provider 仍指向 `http://127.0.0.1:4010/v1`。开发设备必须使用未初始化的全新 Release 解压目录；检测到多项目、残留注册表或不兼容 Provider 时，Launcher 会拒绝启动且不自动回退到初始化，以避免修改现有配置。没有现有适配器配置的普通用户仍走上面的首次初始化流程。
+
+共享预检只验证非敏感的结构兼容性；真正的可用性仍以启动后的健康检查为准。
+
 ### 使用前应知道的安全与完整性保护
 
 - 启动器用当前 Windows 用户的 DPAPI 保存 API Key，保存位置在用户 LocalAppData 目录下、项目仓库之外；密钥不作为命令行参数传递，也不会写入项目配置文件。
@@ -38,7 +46,7 @@
 ### 在 CI 中生成包（推荐）
 
 1. 提交并推送需要发布的代码。
-2. 若只需 Artifact，可在 GitHub Actions 手动运行 `Windows Runtime` 工作流；手动运行不会创建 GitHub Release。若需发布，请推送与 `Cargo.toml` 中 `version` 完全匹配的 `v<version>` 标签，例如 `v0.2.0`。
+2. 若只需 Artifact，可在 GitHub Actions 手动运行 `Windows Runtime` 工作流；手动运行不会创建 GitHub Release。若需发布，请推送与 `Cargo.toml` 中 `version` 完全匹配的 `v<version>` 标签，例如 `v0.2.1`。
 3. 等待 `Build Windows x64 runtime` 成功。
 4. 所有运行都会上传 artifact `codex-mimo-adapter-windows-x64-<提交号>`。标签运行还会创建或更新对应的 GitHub Release，并上传 `codex-mimo-adapter-windows-x64-v<version>.zip`。
 5. Release ZIP 保留 `codex-mimo-adapter-windows-x64/` 根目录；解压后从该目录运行 `CodexMiMoLauncher.exe`。

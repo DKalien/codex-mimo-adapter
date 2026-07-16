@@ -46,6 +46,7 @@ internal sealed class LauncherForm : Form
     private Process? _adapter;
     private RuntimeValidation _runtimeValidation;
     private bool _busy;
+    private bool _hasLoadedSavedKey;
     private bool _exitRequested;
     // This is set before StopAsync reaches its first await. It prevents the Exited callback
     // from disposing the same Process object while StopAsync is still awaiting it.
@@ -81,7 +82,6 @@ internal sealed class LauncherForm : Form
         _tray.DoubleClick += (_, _) => RestoreFromTray();
 
         BuildLayout();
-        _apiKey.Text = _secrets.Load() ?? string.Empty;
         _start.Click += async (_, _) => await StartAsync();
         _check.Click += async (_, _) => await CheckAsync();
         _stop.Click += async (_, _) => await StopAsync();
@@ -137,13 +137,6 @@ internal sealed class LauncherForm : Form
     private async Task StartAsync()
     {
         if (_busy) return;
-        var apiKey = _apiKey.Text.Trim();
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            SetStatus("需要先输入并保存 MiMo API Key。", Color.Firebrick);
-            _apiKey.Focus();
-            return;
-        }
         if (!EnsureRuntimeValidated()) return;
         if (_adapter is { HasExited: false })
         {
@@ -158,6 +151,27 @@ internal sealed class LauncherForm : Form
         if (await IsPortOccupiedAsync())
         {
             SetStatus("端口 4010 被其他程序占用，无法启动。", Color.Firebrick);
+            return;
+        }
+
+        var sharedConfiguration = SharedConfigurationProbe.Inspect(_paths);
+        if (sharedConfiguration.IsAvailable)
+        {
+            await StartWithExistingConfigurationAsync();
+            return;
+        }
+        if (sharedConfiguration.BlocksInitialization)
+        {
+            SetStatus(sharedConfiguration.Message, Color.Firebrick);
+            return;
+        }
+
+        LoadSavedKeyIfNeeded();
+        var apiKey = _apiKey.Text.Trim();
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            SetStatus("需要先输入并保存 MiMo API Key。", Color.Firebrick);
+            _apiKey.Focus();
             return;
         }
 
@@ -180,21 +194,7 @@ internal sealed class LauncherForm : Form
 
             var startInfo = CreateCoreStartInfo("run");
             startInfo.Environment["MIMO_API_KEY"] = apiKey;
-            var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-            process.OutputDataReceived += (_, e) => AppendLog("core", e.Data, null, _apiKey.Text.Trim());
-            process.ErrorDataReceived += (_, e) => AppendLog("core", null, e.Data, _apiKey.Text.Trim());
-            process.Exited += AdapterExited;
-            if (!process.Start())
-            {
-                SetStatus("无法启动核心适配器进程。", Color.Firebrick);
-                return;
-            }
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-            _adapter = process;
-            _stop.Enabled = _restart.Enabled = true;
-            SetStatus("正在启动适配器…", Color.DimGray);
-            await WaitForHealthyAsync();
+            await StartCoreAsync(startInfo, apiKey);
         }
         catch (Exception ex)
         {
@@ -204,6 +204,47 @@ internal sealed class LauncherForm : Form
         {
             SetBusy(false);
         }
+    }
+
+    private async Task StartWithExistingConfigurationAsync()
+    {
+        SetBusy(true);
+        try
+        {
+            SetStatus("正在复用现有项目配置启动；不会修改 Codex 配置或项目注册表…", Color.DimGray);
+            var startInfo = CreateCoreStartInfo("run");
+            // A shared launch must use the existing project's persisted credential and
+            // never inherit an unrelated key from the launcher's process environment.
+            startInfo.Environment.Remove("MIMO_API_KEY");
+            await StartCoreAsync(startInfo, null);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"共享配置启动失败：{ReadableError(ex)}", Color.Firebrick);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private async Task StartCoreAsync(ProcessStartInfo startInfo, string? secret)
+    {
+        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        process.OutputDataReceived += (_, e) => AppendLog("core", e.Data, null, secret);
+        process.ErrorDataReceived += (_, e) => AppendLog("core", null, e.Data, secret);
+        process.Exited += AdapterExited;
+        if (!process.Start())
+        {
+            process.Dispose();
+            throw new InvalidOperationException("无法启动核心适配器进程。");
+        }
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        _adapter = process;
+        _stop.Enabled = _restart.Enabled = true;
+        SetStatus("正在启动适配器…", Color.DimGray);
+        await WaitForHealthyAsync();
     }
 
     private string? GetInitializationStatus()
@@ -524,9 +565,18 @@ internal sealed class LauncherForm : Form
 
     private void ClearKey()
     {
+        _hasLoadedSavedKey = true;
         _apiKey.Clear();
         _secrets.Clear();
         SetStatus("已清除启动器保存的 API Key。", Color.DimGray);
+    }
+
+    private void LoadSavedKeyIfNeeded()
+    {
+        if (_hasLoadedSavedKey) return;
+        _hasLoadedSavedKey = true;
+        if (string.IsNullOrWhiteSpace(_apiKey.Text))
+            _apiKey.Text = _secrets.Load() ?? string.Empty;
     }
 
     private void SetBusy(bool busy)
@@ -696,6 +746,220 @@ internal sealed record RuntimeValidation(bool IsValid, bool IsMissing, FileInfo?
 {
     public static RuntimeValidation Valid(FileInfo coreExecutable, string description) => new(true, false, coreExecutable, description);
     public static RuntimeValidation Invalid(string description, bool missing = false) => new(false, missing, null, description);
+}
+
+internal readonly record struct SharedConfigurationProbe(bool IsAvailable, bool BlocksInitialization, string Message)
+{
+    private const string ProviderSection = "model_providers.mimo_adapter";
+    private const string AuthSection = "model_providers.mimo_adapter.auth";
+
+    public static SharedConfigurationProbe Inspect(LauncherPaths paths)
+    {
+        var releaseHasProjectEnvironment = File.Exists(paths.ProjectEnvironmentFile);
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var registryPath = Path.Combine(userProfile, ".codex-mimo-adapter", "project-registry.toml");
+        var configPath = Path.Combine(userProfile, ".codex", "config.toml");
+        var registryExists = File.Exists(registryPath);
+        var configExists = File.Exists(configPath);
+        if (!registryExists)
+        {
+            if (!configExists || !HasMimoProviderSections(configPath))
+            {
+                if (releaseHasProjectEnvironment)
+                    return Block("Release 目录已有项目环境文件，但没有对应的项目注册表；为避免改写现有配置，未启动。请使用全新解压的 Release 组合包。");
+                return NotApplicable();
+            }
+            return Block("检测到缺少项目注册表的现有适配器 Provider 配置；为避免覆盖，未执行初始化。请修复或清理旧配置后重试。");
+        }
+        if (!configExists)
+            return Block("检测到缺少 Codex Provider 配置的现有项目注册表；为避免覆盖，未执行初始化。请修复或清理旧配置后重试。");
+        try
+        {
+            var roots = ReadRegistryRoots(registryPath);
+            if (releaseHasProjectEnvironment)
+            {
+                if (roots.Count == 1 && PathsEqual(NormalizeRoot(roots[0]), paths.RepositoryRoot.FullName))
+                    return NotApplicable();
+                return Block("Release 目录含有其他项目的初始化残留；共享启动不会改写现有配置。请使用全新解压的 Release 组合包。");
+            }
+            if (roots.Count != 1)
+                return Block("现有项目注册表不是单项目状态；共享启动不会修改多项目配置。");
+
+            var projectRoot = NormalizeRoot(roots[0]);
+            if (PathsEqual(projectRoot, paths.RepositoryRoot.FullName))
+                return Block("Release 目录已被注册为项目；为避免改变现有项目状态，未执行共享启动。");
+
+            var projectEnv = Path.Combine(projectRoot, ".codex-mimo-adapter.env");
+            if (!File.Exists(projectEnv))
+                return Block("注册表中的现有项目缺少 .codex-mimo-adapter.env；未执行共享启动。");
+            if (!HasPersistedProjectCredentials(projectEnv))
+                return Block("现有项目未保存可复用的本地凭据；未执行共享启动。");
+            if (!HasCompatibleProviderConfiguration(configPath))
+                return Block("现有 Codex Provider 配置不兼容共享启动；未执行任何配置写入。");
+
+            return new SharedConfigurationProbe(true, false, "");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return Block($"无法安全读取现有配置：{ex.Message}");
+        }
+    }
+
+    private static SharedConfigurationProbe NotApplicable() => new(false, false, "");
+
+    private static SharedConfigurationProbe Block(string message) => new(false, true, message);
+
+    private static List<string> ReadRegistryRoots(string registryPath)
+    {
+        var contents = File.ReadAllText(registryPath);
+        var roots = new List<string>();
+        foreach (Match match in Regex.Matches(contents, @"(?m)^\s*root\s*=\s*(?:'(?<literal>[^']*)'|""(?<basic>(?:[^""\\]|\\.)*)"")\s*$"))
+        {
+            var root = match.Groups["literal"].Success
+                ? match.Groups["literal"].Value
+                : DecodeTomlBasicString(match.Groups["basic"].Value);
+            if (!string.IsNullOrWhiteSpace(root)) roots.Add(root);
+        }
+        return roots;
+    }
+
+    private static string NormalizeRoot(string root) => root.StartsWith("\\\\?\\", StringComparison.Ordinal) ? root[4..] : root;
+
+    private static bool PathsEqual(string left, string right) =>
+        String.Equals(Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasPersistedProjectCredentials(string projectEnv)
+    {
+        var hasStoredApiKey = false;
+        var hasLocalToken = false;
+        var usesProcessKey = false;
+        foreach (var line in File.ReadLines(projectEnv))
+        {
+            var separator = line.IndexOf('=');
+            if (separator <= 0) continue;
+            var key = line[..separator].Trim();
+            if (String.Equals(key, "MIMO_API_KEY", StringComparison.Ordinal))
+                hasStoredApiKey = HasNonWhitespaceSuffix(line, separator + 1);
+            else if (String.Equals(key, "CODEX_MIMO_LOCAL_TOKEN", StringComparison.Ordinal))
+                hasLocalToken = HasNonWhitespaceSuffix(line, separator + 1);
+            else if (String.Equals(key, "CODEX_MIMO_API_KEY_SOURCE", StringComparison.Ordinal))
+                usesProcessKey = SuffixEquals(line, separator + 1, "process");
+        }
+        return hasStoredApiKey && hasLocalToken && !usesProcessKey;
+    }
+
+    private static bool HasNonWhitespaceSuffix(string line, int start)
+    {
+        for (var index = start; index < line.Length; index++)
+        {
+            if (!Char.IsWhiteSpace(line[index])) return true;
+        }
+        return false;
+    }
+
+    private static bool SuffixEquals(string line, int start, string expected)
+    {
+        while (start < line.Length && Char.IsWhiteSpace(line[start])) start++;
+        var end = line.Length;
+        while (end > start && Char.IsWhiteSpace(line[end - 1])) end--;
+        return line.AsSpan(start, end - start).SequenceEqual(expected.AsSpan());
+    }
+
+    private static bool HasCompatibleProviderConfiguration(string configPath)
+    {
+        var hasBaseUrl = false;
+        var hasResponsesWireApi = false;
+        var hasAuthArguments = false;
+        string? command = null;
+        var section = String.Empty;
+        foreach (var line in File.ReadLines(configPath))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+            {
+                section = trimmed[1..^1].Trim();
+                continue;
+            }
+            if (String.Equals(section, ProviderSection, StringComparison.Ordinal))
+            {
+                hasBaseUrl |= HasTomlStringAssignment(trimmed, "base_url", "http://127.0.0.1:4010/v1");
+                hasResponsesWireApi |= HasTomlStringAssignment(trimmed, "wire_api", "responses");
+                continue;
+            }
+            if (!String.Equals(section, AuthSection, StringComparison.Ordinal)) continue;
+            hasAuthArguments |= Regex.IsMatch(trimmed, @"^args\s*=\s*\[\s*[""']auth[""']\s*,\s*[""']print-local-token[""']\s*\]\s*$");
+            command ??= ReadTomlStringAssignment(trimmed, "command");
+        }
+        return hasBaseUrl && hasResponsesWireApi && hasAuthArguments
+            && command is not null && IsSupportedExistingCommand(command);
+    }
+
+    private static bool HasMimoProviderSections(string configPath)
+    {
+        foreach (var line in File.ReadLines(configPath))
+        {
+            var section = line.Trim();
+            if (String.Equals(section, $"[{ProviderSection}]", StringComparison.Ordinal)
+                || String.Equals(section, $"[{AuthSection}]", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool HasTomlStringAssignment(string line, string key, string expected) =>
+        String.Equals(ReadTomlStringAssignment(line, key), expected, StringComparison.Ordinal);
+
+    private static string? ReadTomlStringAssignment(string line, string key)
+    {
+        var match = Regex.Match(line, $@"^\s*{Regex.Escape(key)}\s*=\s*(?<quote>[""'])(?<value>[^""']+)\k<quote>\s*$");
+        if (!match.Success) return null;
+        var value = match.Groups["value"].Value;
+        return match.Groups["quote"].Value == "\""
+            ? DecodeTomlBasicString(value)
+            : value;
+    }
+
+    private static string? DecodeTomlBasicString(string value)
+    {
+        if (!value.Contains('\\')) return value;
+        var decoded = new System.Text.StringBuilder(value.Length);
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            if (character != '\\')
+            {
+                decoded.Append(character);
+                continue;
+            }
+            if (++index >= value.Length) return null;
+            var escaped = value[index] switch
+            {
+                'b' => '\b',
+                't' => '\t',
+                'n' => '\n',
+                'f' => '\f',
+                'r' => '\r',
+                '"' => '"',
+                '\\' => '\\',
+                _ => '\0',
+            };
+            if (escaped == '\0') return null;
+            decoded.Append(escaped);
+        }
+        return decoded.ToString();
+    }
+
+    private static bool IsSupportedExistingCommand(string command)
+    {
+        if (Path.IsPathRooted(command))
+            return String.Equals(Path.GetFileName(command), "codex-mimo-adapter.exe", StringComparison.OrdinalIgnoreCase)
+                && File.Exists(command);
+        if (!String.Equals(command, "codex-mimo-adapter", StringComparison.OrdinalIgnoreCase)) return false;
+        var pathEntries = (Environment.GetEnvironmentVariable("PATH") ?? String.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        return pathEntries.Any(entry => File.Exists(Path.Combine(entry.Trim(), "codex-mimo-adapter.exe")));
+    }
 }
 
 internal readonly record struct SemanticVersion(int Major, int Minor, int Patch, string? PreRelease) : IComparable<SemanticVersion>
