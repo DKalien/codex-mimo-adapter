@@ -2,7 +2,7 @@ name = "worker"
 description = "Global MiMo-backed implementation worker for bounded coding tasks."
 model_provider = "mimo_adapter"
 model = "mimo_adapter/5a262d975c45/mimo/mimo-v2.5"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 
 developer_instructions = """

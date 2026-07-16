@@ -1,13 +1,14 @@
 use crate::cli::InitArgs;
 use crate::config::{
     DEFAULT_HOST, DEFAULT_MAX_CONCURRENCY, DEFAULT_MAX_REQUEST_BYTES, DEFAULT_STATE_DB,
-    DEFAULT_STATE_TTL_SECONDS, DEFAULT_TIMEOUT_SECONDS,
+    DEFAULT_STATE_TTL_SECONDS, DEFAULT_TIMEOUT_SECONDS, PROCESS_ENV_API_KEY_SOURCE,
+    PROJECT_ENV_API_KEY_SOURCE,
 };
 use crate::project::{generate_project_id, project_key_from_id, ProjectPaths, ProjectRegistry};
 use anyhow::{anyhow, Context};
 
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use toml_edit::{value, Array, DocumentMut, Item, Table};
@@ -27,15 +28,22 @@ pub fn run_init(args: InitArgs) -> anyhow::Result<()> {
     let logger = InitLogger::new()?;
     logger.log("init started")?;
 
-    let api_key = match args.api_key {
-        Some(value) if !value.trim().is_empty() => value,
-        _ => prompt("MiMo API key")?,
+    let (api_key, api_key_source) = match args.api_key {
+        Some(value) if !value.trim().is_empty() => (value, ApiKeySource::ProjectEnv),
+        _ if args.api_key_stdin => (read_api_key_from_stdin()?, ApiKeySource::ProcessEnv),
+        _ => (prompt("MiMo API key")?, ApiKeySource::ProjectEnv),
     };
     let local_token = format!("codex-mimo-{}", Uuid::new_v4().simple());
 
+    let api_key_entry = match api_key_source {
+        ApiKeySource::ProjectEnv => format!("MIMO_API_KEY={api_key}\n"),
+        ApiKeySource::ProcessEnv => {
+            format!("{PROJECT_ENV_API_KEY_SOURCE}={PROCESS_ENV_API_KEY_SOURCE}\n")
+        }
+    };
+
     let env_contents = format!(
-        "MIMO_API_KEY={api_key}\n\
-         CODEX_MIMO_LOCAL_TOKEN={local_token}\n\
+        "{api_key_entry}CODEX_MIMO_LOCAL_TOKEN={local_token}\n\
          CODEX_MIMO_PROJECT_ID={project_id}\n\
          CODEX_MIMO_HOST={host}\n\
          CODEX_MIMO_PORT={port}\n\
@@ -101,6 +109,24 @@ pub fn run_init(args: InitArgs) -> anyhow::Result<()> {
     logger.log("init completed successfully")?;
     println!("Initialization complete. Next: codex-mimo-adapter run");
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum ApiKeySource {
+    ProjectEnv,
+    ProcessEnv,
+}
+
+fn read_api_key_from_stdin() -> anyhow::Result<String> {
+    let mut value = String::new();
+    io::stdin().read_to_string(&mut value)?;
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Err(anyhow!(
+            "MiMo API key supplied through standard input is required"
+        ));
+    }
+    Ok(value)
 }
 
 fn prompt(label: &str) -> anyhow::Result<String> {

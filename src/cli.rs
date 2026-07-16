@@ -22,6 +22,10 @@ pub struct InitArgs {
     #[arg(long)]
     pub api_key: Option<String>,
 
+    /// Read the MiMo API key from standard input instead of a command-line argument.
+    #[arg(long, conflicts_with = "api_key")]
+    pub api_key_stdin: bool,
+
     #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
 

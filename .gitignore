@@ -12,5 +12,9 @@ tmp_*
 build/
 dist/
 
+# Generated launcher runtime. Source-controlled contract lives in runtime/windows-x64/README.md.
+runtime/windows-x64/codex-mimo-adapter.exe
+runtime/windows-x64/manifest.json
+
 # Local config with secrets
 .codex/config.toml

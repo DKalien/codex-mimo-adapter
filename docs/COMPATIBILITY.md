@@ -71,11 +71,15 @@ Not planned for this project:
 
 - full cc-switch port
 - provider aggregation platform
-- UI, hooks, plugins, statusLine, or upstream session management
+- adapter-side hooks, plugins, statusLine, or upstream session management
 - automatic model fallback/routing
 - automatic multimodal retry after stripping media
 - silent multimodal degradation that makes a text-only model pretend it saw media
 - Mission-style task tiers, evidence ledgers, run records, patch escrow, claim gates, or burn-in frameworks
+
+The repository includes a small Windows launcher for local adapter lifecycle and
+first-run configuration. It is not a Codex UI, a provider-management platform, or a
+general upstream session manager; protocol conversion remains in the core adapter.
 
 ## Additional upstreams
 
@@ -87,4 +91,4 @@ The preferred order is:
 2. Add small profile differences for mostly OpenAI Chat Completions-compatible upstreams.
 3. Add provider-specific quirks only when real traffic requires them.
 4. Introduce a dedicated provider adapter trait only if profile-level differences are insufficient.
-5. Avoid marketplace, routing, fallback, pricing, or UI management features.
+5. Avoid marketplace, routing, fallback, pricing, or broader UI-management features.

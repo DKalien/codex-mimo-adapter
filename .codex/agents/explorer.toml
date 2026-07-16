@@ -2,7 +2,7 @@ name = "explorer"
 description = "Global MiMo-backed read-only explorer for repository investigation and verification."
 model_provider = "mimo_adapter"
 model = "mimo_adapter/5a262d975c45/mimo/mimo-v2.5"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 
 developer_instructions = """

@@ -1,10 +1,13 @@
 use axum::http::{header::AUTHORIZATION, HeaderMap, StatusCode};
 use axum::routing::get;
 use axum::{Json, Router};
+use codex_mimo_adapter::config::{Config, ConfigOverrides};
+use codex_mimo_adapter::project::read_project_env;
 use serde_json::json;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -72,6 +75,58 @@ fn init_writes_project_files_and_auth_prints_local_token() {
     let external_auth_output = sandbox.run_in(&external_dir, ["auth", "print-local-token"]);
     assert_success(&external_auth_output);
     assert_eq!(stdout(&external_auth_output).trim(), signed_token);
+}
+
+#[test]
+fn init_from_stdin_uses_inherited_key_without_writing_it_to_project_env() {
+    let sandbox = TestSandbox::new("init-api-key-stdin");
+    let secret = "stdin-api-key-must-not-be-written";
+    let output = sandbox.run_with_stdin(["init", "--api-key-stdin"], secret);
+    assert_success(&output);
+    assert!(
+        !stdout(&output).contains(secret),
+        "init must not echo the key to stdout"
+    );
+    assert!(
+        !stderr(&output).contains(secret),
+        "init must not echo the key to stderr"
+    );
+
+    let env_path = sandbox.project().join(".codex-mimo-adapter.env");
+    let env_text = fs::read_to_string(&env_path).unwrap();
+    assert!(env_text.contains("CODEX_MIMO_API_KEY_SOURCE=process"));
+    assert!(!env_text.contains(secret));
+    assert!(!env_text.contains("MIMO_API_KEY="));
+
+    let project_env = read_project_env(&env_path).unwrap();
+    let inherited_env = HashMap::from([("MIMO_API_KEY".to_string(), secret.to_string())]);
+    let config = Config::from_sources(&project_env, &inherited_env, ConfigOverrides::default())
+        .expect("run must resolve a stdin-initialized project from inherited MIMO_API_KEY");
+    assert_eq!(config.upstream_key, secret);
+
+    let missing_key = sandbox.run_without_env(["run"], "MIMO_API_KEY");
+    assert!(!missing_key.status.success());
+    assert!(
+        stderr(&missing_key).contains("inherited process environment"),
+        "missing-key diagnostic was: {}",
+        stderr(&missing_key)
+    );
+}
+
+#[test]
+fn init_rejects_api_key_and_api_key_stdin_together() {
+    let sandbox = TestSandbox::new("init-api-key-conflict");
+    let output = sandbox.run_with_stdin(
+        ["init", "--api-key", "argument-key", "--api-key-stdin"],
+        "stdin-key",
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("cannot be used with '--api-key-stdin'"),
+        "conflict diagnostic was: {}",
+        stderr(&output)
+    );
+    assert!(!sandbox.project().join(".codex-mimo-adapter.env").exists());
 }
 
 #[test]
@@ -585,6 +640,52 @@ impl TestSandbox {
             .current_dir(current_dir)
             .env("USERPROFILE", &self.home)
             .env("HOME", &self.home)
+            .output()
+            .unwrap()
+    }
+
+    fn run_with_stdin<I, S>(&self, args: I, stdin: &str) -> Output
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut command = Command::new(binary_path());
+        for arg in args {
+            command.arg(arg.as_ref());
+        }
+        let mut child = command
+            .current_dir(&self.project)
+            .env("USERPROFILE", &self.home)
+            .env("HOME", &self.home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin.as_bytes())
+            .unwrap();
+        child.wait_with_output().unwrap()
+    }
+
+    fn run_without_env<I, S>(&self, args: I, key: &str) -> Output
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut command = Command::new(binary_path());
+        for arg in args {
+            command.arg(arg.as_ref());
+        }
+        command
+            .current_dir(&self.project)
+            .env("USERPROFILE", &self.home)
+            .env("HOME", &self.home)
+            .env_remove(key)
             .output()
             .unwrap()
     }

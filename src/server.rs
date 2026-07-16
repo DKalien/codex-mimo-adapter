@@ -22,8 +22,8 @@ use crate::media_guard::{
     unsupported_multimodal_error_message,
 };
 use crate::project::{
-    project_id_from_key, project_key_from_id, read_project_env, registry_dir_path,
-    validate_adapter_token, ProjectRegistry, PROJECT_ENV_FILENAME,
+    current_environment, project_id_from_key, project_key_from_id, read_project_env,
+    registry_dir_path, validate_adapter_token, ProjectRegistry, PROJECT_ENV_FILENAME,
 };
 use crate::state::{now_ts, StateStore};
 use crate::upstream::{
@@ -705,7 +705,11 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
                 continue;
             }
         };
-        let env = HashMap::new();
+        // The adapter process owns MIMO_API_KEY when init used --api-key-stdin.
+        // Keep the local token project-scoped so unrelated process environments
+        // cannot change adapter authentication during a refresh.
+        let mut env = current_environment();
+        env.remove("CODEX_MIMO_LOCAL_TOKEN");
         let config = match Config::from_sources(&project_env, &env, state.config_overrides.clone())
         {
             Ok(c) => c,

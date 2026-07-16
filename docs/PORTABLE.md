@@ -3,6 +3,50 @@
 This document explains how to deploy `codex-mimo-adapter` on a Windows x64 machine
 without a Rust toolchain, using the pre-built portable ZIP package.
 
+## Launcher runtime updates
+
+The portable ZIP remains supported. The desktop launcher distribution uses a separate
+Windows x64 core runtime instead: `codex-mimo-adapter.exe` plus
+`runtime/windows-x64/manifest.json`. The manifest records the adapter version,
+SHA-256, platform, and minimum compatible launcher version.
+
+Development machines and CI create that runtime with:
+
+```powershell
+.\scripts\stage-runtime-windows.ps1 -MinimumLauncherVersion "0.1.0"
+```
+
+The executable and generated manifest are deliberately ignored by Git. Do not commit
+them or API keys to the repository. CI uploads both a core-only runtime artifact and
+a combined end-user artifact. The combined artifact has this layout:
+
+```text
+CodexMiMoLauncher.exe
+runtime/windows-x64/codex-mimo-adapter.exe
+runtime/windows-x64/manifest.json
+```
+
+The current launcher requires this matching runtime below the same extracted root;
+it does not download a runtime for a bare source clone. The manifest is the integrity
+contract for a runtime package.
+
+## Choose the right installation path
+
+- **Development machine:** clone the source repository and install Rust to build the
+  core runtime. Building the self-contained Windows launcher also requires the .NET
+  8 SDK. Use `stage-runtime-windows.ps1` to place a local core in the expected
+  runtime directory.
+- **Normal Windows user:** download and extract the CI combined Windows x64 artifact
+  (or a future combined Release package), then run `CodexMiMoLauncher.exe` from its
+  extracted root. Do not treat a bare `git clone` or the core-only runtime artifact
+  as a ready-to-run installation.
+
+The launcher saves an entered MiMo API key outside the repository using the current
+Windows user's DPAPI profile. On first run it invokes
+`codex-mimo-adapter init --api-key-stdin`: the key is delivered through standard
+input, project configuration records only that the key comes from the process
+environment, and the subsequently launched core inherits that environment value.
+
 ## Package Contents
 
 ```

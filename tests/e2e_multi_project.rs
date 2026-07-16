@@ -182,6 +182,8 @@ async fn test_admin_refresh_loads_new_project() {
     let _env_guard = common::env_lock().lock().await;
     let orig_user = std::env::var("USERPROFILE").ok();
     let orig_home = std::env::var("HOME").ok();
+    let orig_mimo_api_key = std::env::var("MIMO_API_KEY").ok();
+    let orig_local_token = std::env::var("CODEX_MIMO_LOCAL_TOKEN").ok();
 
     let home = std::env::temp_dir().join(format!("test_admin_refresh_{}", Uuid::new_v4()));
     std::fs::create_dir_all(&home).unwrap();
@@ -214,11 +216,13 @@ async fn test_admin_refresh_loads_new_project() {
     std::fs::create_dir_all(&proj_b_root).unwrap();
     let pid_b = "project-b";
     let raw_b = "raw-token-b";
+    std::env::set_var("MIMO_API_KEY", "key-b-from-service-environment");
+    std::env::set_var("CODEX_MIMO_LOCAL_TOKEN", "must-not-override-project-token");
 
     std::fs::write(
         proj_b_root.join(PROJECT_ENV_FILENAME),
         format!(
-            "MIMO_API_KEY=key-b\nCODEX_MIMO_LOCAL_TOKEN={raw_b}\n             CODEX_MIMO_PROJECT_ID={pid_b}\n             MIMO_API_BASE_URL=http://127.0.0.1:{port}\n             CODEX_MIMO_STATE_DB=.codex-mimo/state.sqlite\n             CODEX_MIMO_HOST=127.0.0.1\nCODEX_MIMO_PORT=4010\n",
+            "CODEX_MIMO_API_KEY_SOURCE=process\nCODEX_MIMO_LOCAL_TOKEN={raw_b}\n             CODEX_MIMO_PROJECT_ID={pid_b}\n             MIMO_API_BASE_URL=http://127.0.0.1:{port}\n             CODEX_MIMO_STATE_DB=.codex-mimo/state.sqlite\n             CODEX_MIMO_HOST=127.0.0.1\nCODEX_MIMO_PORT=4010\n",
             port = upstream_b.port()
         ),
     ).unwrap();
@@ -307,6 +311,14 @@ async fn test_admin_refresh_loads_new_project() {
     match orig_home {
         Some(v) => std::env::set_var("HOME", v),
         None => std::env::remove_var("HOME"),
+    }
+    match orig_mimo_api_key {
+        Some(v) => std::env::set_var("MIMO_API_KEY", v),
+        None => std::env::remove_var("MIMO_API_KEY"),
+    }
+    match orig_local_token {
+        Some(v) => std::env::set_var("CODEX_MIMO_LOCAL_TOKEN", v),
+        None => std::env::remove_var("CODEX_MIMO_LOCAL_TOKEN"),
     }
 
     let _ = std::fs::remove_dir_all(&home);

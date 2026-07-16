@@ -19,6 +19,8 @@ The project is in the protocol-compatibility and validation phase.
 | Mock integration tests | Implemented | L2 tests use mock upstream behavior and do not require external MiMo Token Plan calls |
 | Real MiMo Token Plan upstream smoke | Implemented | Real `/v1/models`, text, stream, function-call, continuation, multimodal, custom tool, and tool-search smoke validation completed on 2026-06-25 |
 | Real Codex subagent E2E | Partial | Project custom subagent smoke has been exercised, but broader end-to-end Codex task validation is still pending |
+| Windows desktop launcher | Implemented | A self-contained Windows launcher manages local start, check, stop, restart, and first-run Codex configuration; it expects the core runtime in the same repository directory |
+| Windows x64 core runtime artifact | Implemented | CI builds the Rust core and emits an EXE plus manifest; it is not committed to Git |
 
 ## Completed protocol work
 
@@ -74,6 +76,23 @@ Priority next step:
 - Decide whether some of those real checks should stay as ignored Rust tests or move into a separate manual/CI smoke layer.
 
 Detailed validation steps are in `docs/VALIDATION.zh-CN.md`, and the latest executed results are in `docs/REAL_VALIDATION_2026-06-25.zh-CN.md`.
+
+## Launcher and distribution boundary
+
+- The launcher is a local Windows lifecycle UI, not a replacement for the core
+  adapter. It starts the matching core executable located at
+  `runtime/windows-x64/codex-mimo-adapter.exe` under the same repository root.
+- A bare source clone deliberately has no runtime EXE or generated manifest. It is a
+  development checkout, not an end-user install.
+- Development/CI machines build the Rust core and the self-contained Windows launcher.
+  Normal users should use the combined Windows x64 package published from CI or a
+  future Release package, rather than compiling a newly cloned source checkout
+  themselves.
+- The launcher stores a saved API key outside the repository with Windows DPAPI.
+  During first-run initialization it passes the key through standard input using
+  `init --api-key-stdin`; this mode records the process-environment source marker in
+  project configuration instead of the raw API key. The launched core receives the
+  key only through its inherited process environment.
 
 ## Follow-up Codex validation
 

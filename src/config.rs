@@ -10,6 +10,8 @@ pub const DEFAULT_STATE_TTL_SECONDS: i64 = 21_600;
 pub const DEFAULT_TIMEOUT_SECONDS: u64 = 300;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_MAX_CONCURRENCY: usize = 8;
+pub const PROJECT_ENV_API_KEY_SOURCE: &str = "CODEX_MIMO_API_KEY_SOURCE";
+pub const PROCESS_ENV_API_KEY_SOURCE: &str = "process";
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -80,8 +82,7 @@ impl Config {
             "MIMO_API_BASE_URL",
             DEFAULT_UPSTREAM_BASE,
         );
-        let upstream_key =
-            choose_required_string(overrides.upstream_key, project_env, env, "MIMO_API_KEY")?;
+        let upstream_key = choose_mimo_api_key(overrides.upstream_key, project_env, env)?;
         let local_token = choose_optional_string(
             overrides.local_token,
             project_env,
@@ -172,6 +173,39 @@ fn choose_required_string(
     choose_optional_string(cli, project_env, env, key)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| anyhow!("{key} is required"))
+}
+
+fn choose_mimo_api_key(
+    cli: Option<String>,
+    project_env: &HashMap<String, String>,
+    env: &HashMap<String, String>,
+) -> anyhow::Result<String> {
+    if let Some(value) = cli.filter(|value| !value.trim().is_empty()) {
+        return Ok(value);
+    }
+    if let Some(value) = project_env
+        .get("MIMO_API_KEY")
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Ok(value.to_string());
+    }
+
+    if project_env
+        .get(PROJECT_ENV_API_KEY_SOURCE)
+        .is_some_and(|source| source == PROCESS_ENV_API_KEY_SOURCE)
+    {
+        return env
+            .get("MIMO_API_KEY")
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+            .ok_or_else(|| {
+                anyhow!(
+                    "MIMO_API_KEY is required in the inherited process environment because project config uses {PROJECT_ENV_API_KEY_SOURCE}={PROCESS_ENV_API_KEY_SOURCE}"
+                )
+            });
+    }
+
+    choose_required_string(None, project_env, env, "MIMO_API_KEY")
 }
 
 fn choose_parse<T>(

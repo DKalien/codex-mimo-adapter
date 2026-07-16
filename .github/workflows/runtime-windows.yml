@@ -1,0 +1,108 @@
+name: Windows Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      minimum_launcher_version:
+        description: Minimum compatible launcher semantic version
+        required: false
+        default: '0.1.0'
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-runtime:
+    name: Build Windows x64 runtime
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build release adapter
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: Publish self-contained launcher
+        run: >-
+          dotnet publish launcher/CodexMiMoLauncher.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -o dist/launcher-publish
+      - name: Stage runtime and generate manifest
+        shell: pwsh
+        env:
+          MINIMUM_LAUNCHER_VERSION: ${{ inputs.minimum_launcher_version || '0.1.0' }}
+        run: >-
+          ./scripts/stage-runtime-windows.ps1
+          -SkipBuild
+          -MinimumLauncherVersion $env:MINIMUM_LAUNCHER_VERSION
+          -OutputDirectory dist/runtime/windows-x64
+      - name: Verify runtime manifest and checksum
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runtime = 'dist/runtime/windows-x64'
+          $manifest = Get-Content -LiteralPath "$runtime/manifest.json" -Raw | ConvertFrom-Json
+          if ($manifest.schema_version -ne 1 -or $manifest.platform -ne 'windows-x64') {
+            throw 'Runtime manifest schema or platform is invalid.'
+          }
+          if ($manifest.adapter.name -ne 'codex-mimo-adapter' -or
+              $manifest.adapter.file -ne 'codex-mimo-adapter.exe') {
+            throw 'Runtime manifest adapter identity is invalid.'
+          }
+          if ($manifest.minimum_launcher_version -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+            throw 'Runtime manifest has an invalid minimum launcher version.'
+          }
+          $actual = (Get-FileHash -LiteralPath "$runtime/$($manifest.adapter.file)" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $manifest.adapter.sha256) {
+            throw 'Runtime executable SHA-256 does not match manifest.'
+          }
+          Write-Host "Verified $($manifest.adapter.file) version $($manifest.adapter.version) with SHA-256 $actual"
+      - name: Upload Windows x64 runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-mimo-adapter-core-windows-x64-${{ github.sha }}
+          path: dist/runtime/windows-x64
+          if-no-files-found: error
+          retention-days: 30
+      - name: Assemble end-user package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $combined = 'dist/codex-mimo-adapter-windows-x64'
+          $runtime = "$combined/runtime/windows-x64"
+          New-Item -ItemType Directory -Force -Path $runtime | Out-Null
+          Copy-Item -LiteralPath 'dist/launcher-publish/CodexMiMoLauncher.exe' -Destination "$combined/CodexMiMoLauncher.exe" -Force
+          Copy-Item -LiteralPath 'dist/runtime/windows-x64/codex-mimo-adapter.exe' -Destination "$runtime/codex-mimo-adapter.exe" -Force
+          Copy-Item -LiteralPath 'dist/runtime/windows-x64/manifest.json' -Destination "$runtime/manifest.json" -Force
+      - name: Verify end-user package layout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $combined = 'dist/codex-mimo-adapter-windows-x64'
+          $launcher = Join-Path $combined 'CodexMiMoLauncher.exe'
+          $runtime = Join-Path $combined 'runtime/windows-x64'
+          $manifestPath = Join-Path $runtime 'manifest.json'
+          foreach ($path in @($launcher, (Join-Path $runtime 'codex-mimo-adapter.exe'), $manifestPath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Combined package is missing $path" }
+          }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $actual = (Get-FileHash -LiteralPath (Join-Path $runtime $manifest.adapter.file) -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $manifest.adapter.sha256) { throw 'Combined runtime SHA-256 does not match manifest.' }
+          Write-Host "Combined package verified: $combined"
+      - name: Upload end-user Windows x64 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-mimo-adapter-windows-x64-${{ github.sha }}
+          path: dist/codex-mimo-adapter-windows-x64
+          if-no-files-found: error
+          retention-days: 30

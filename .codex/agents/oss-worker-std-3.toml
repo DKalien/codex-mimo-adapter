@@ -8,7 +8,7 @@ name = "oss_worker_std_docs"
 description = "MiMo standard worker for documentation, text processing, and lightweight maintenance."
 model_provider = "mimo_adapter"
 model = "mimo_adapter/5a262d975c45/mimo/mimo-v2.5"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 
 developer_instructions = """
