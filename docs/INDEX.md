@@ -5,6 +5,7 @@ Docs are grouped by purpose.
 | File | Purpose |
 |---|---|
 | [USAGE.zh-CN.md](USAGE.zh-CN.md) | Daily Chinese setup, usage, and troubleshooting guide. |
+| [PORTABLE.zh-CN.md](PORTABLE.zh-CN.md) | Chinese portable deployment and desktop Launcher guide. |
 | [VALIDATION.zh-CN.md](VALIDATION.zh-CN.md) | Real MiMo Token Plan and Codex validation checklist. |
 | [DIAGNOSTICS.md](DIAGNOSTICS.md) | Runtime diagnostics and log interpretation. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Compatibility scope, references, implementation mapping, and non-goals. |
@@ -19,7 +20,8 @@ Also see:
 Normal use:
 
 1. Read `USAGE.zh-CN.md`.
-2. Use `DIAGNOSTICS.md` when something fails.
+2. Read `PORTABLE.zh-CN.md` for the portable desktop Launcher deployment.
+3. Use `DIAGNOSTICS.md` when something fails.
 
 Real validation:
 

@@ -183,6 +183,7 @@ MIMO_API_KEY="你的密钥" cargo test --test e2e_real_smoke test_e2e_real_valid
 | 文件 | 用途 |
 |---|---|
 | [docs/USAGE.zh-CN.md](docs/USAGE.zh-CN.md) | 简短的自用设置和故障排除指南 |
+| [docs/PORTABLE.zh-CN.md](docs/PORTABLE.zh-CN.md) | 面向普通 Windows 用户的便携式部署与桌面 Launcher 使用说明 |
 | [docs/REAL_VALIDATION_2026-06-25.zh-CN.md](docs/REAL_VALIDATION_2026-06-25.zh-CN.md) | 最新真实上游 smoke 和部分 Codex 验证记录 |
 | [docs/VALIDATION.zh-CN.md](docs/VALIDATION.zh-CN.md) | 完整的手动验证清单 |
 | [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) | 运行时诊断和日志解读 |
