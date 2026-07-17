@@ -41,15 +41,18 @@ After installation, `codex-mimo-adapter` is available as a global command.
 
 ## Quick Start
 
-Initialize a project, start the adapter, and verify it works:
+For Windows end users, use the combined Release package and `CodexMiMoLauncher.exe` described in [the Chinese launcher guide](docs/PORTABLE.zh-CN.md). It keeps the API key in Windows DPAPI, creates a stable user-level route, and needs no Rust toolchain.
+
+For CLI users, initialize the stable global profile, start the adapter, and verify it works:
 
 ```powershell
-# 1. Initialize the current project with your MiMo Token Plan API key
-codex-mimo-adapter init --api-key "<your-mimo-token-plan-api-key>"
-#   - Writes .codex-mimo-adapter.env (project-level env)
-#   - Registers the project in the global registry (~/.codex-mimo-adapter/)
-#   - Writes .codex/agents/*.toml with routed model names
-#   - Writes ~/.codex/config.toml with a single "mimo_adapter" provider
+# 1. Configure the user-level profile and nine global agent templates.
+#    The key is read from stdin and is not written to global.env.
+$env:MIMO_API_KEY = "<your-mimo-token-plan-api-key>"
+$env:MIMO_API_KEY | codex-mimo-adapter global-init --api-key-stdin
+#   - Writes ~/.codex-mimo-adapter/global.env without the API key
+#   - Writes ~/.codex/agents/*.toml with mimo_adapter/global/mimo/... routes
+#   - Updates ~/.codex/config.toml with the "mimo_adapter" provider
 
 # 2. Start the adapter (single instance serving all registered projects)
 codex-mimo-adapter run
@@ -64,7 +67,7 @@ codex-mimo-adapter auth print-local-token
 During development you can still run from source:
 
 ```powershell
-cargo run -- init --api-key "<your-key>"
+$env:MIMO_API_KEY | cargo run -- global-init --api-key-stdin
 cargo run -- run
 ```
 
@@ -76,16 +79,18 @@ Or use the repo-local helper:
 
 ### Agent templates and model routing
 
-`init` writes the nine managed subagent templates into `.codex/agents/` with a routed model format:
+`global-init` writes the nine managed subagent templates into `~/.codex/agents/` with a stable routed model format:
 
 | Field | Value | Example |
 |---|---|---|
 | `model_provider` | `mimo_adapter` (fixed) | `mimo_adapter` |
-| `model` | `mimo_adapter/<project_key>/<real_model>` | `mimo_adapter/c8b0cfc9ca15/mimo/deepseek-v4-flash` |
+| `model` | `mimo_adapter/global/<real_model>` | `mimo_adapter/global/mimo/deepseek-v4-flash` |
 
-The project key is a short hash derived from the project root path. The adapter server parses this format to extract the project and upstream model, then routes the request to the correct API key and upstream base URL.
+The `global` key is independent of the project root, so the same global agents work from every workspace. The adapter server parses this format and routes it to the global profile.
 
-The old bare format `mimo/<model>` is no longer supported; run `init` again to regenerate templates.
+The existing `init` command remains available for advanced project-specific routes (`mimo_adapter/<project_key>/mimo/<model>`), including separate project API keys.
+
+The old bare format `mimo/<model>` is no longer supported; run `global-init` (or legacy `init`) again to regenerate templates.
 
 ### Multi-project usage
 
@@ -103,13 +108,13 @@ The `/admin/refresh` endpoint reads the registry and loads any projects not alre
 
 `init` writes the default runtime settings into the current project's `.codex-mimo-adapter.env`, including a `CODEX_MIMO_PROJECT_ID`. Edit that file when you need to change the stored API key, port, token, or SQLite path.
 
-Each project directory has its own `.codex-mimo-adapter.env`. The adapter also maintains a global registry at `~/.codex-mimo-adapter/project-registry.toml` to discover projects at startup.
+The global profile is stored at `~/.codex-mimo-adapter/global.env` and deliberately contains no upstream API key. Advanced project routes use `.codex-mimo-adapter.env`; their registry is at `~/.codex-mimo-adapter/project-registry.toml`.
 
 Runtime precedence is `CLI flags > .codex-mimo-adapter.env > process environment > defaults`.
 For available variables see the [Environment variables](#environment-variables) table below.
-`run`/`start` loads all registered projects from the global registry. `check` reads config from the closest project env file.
-`auth print-local-token` finds a local token from the closest project env or any registered project, then signs an adapter-level token.
-Project routing is handled entirely by the adapter server via `model = mimo_adapter/<project_key>/<real_model>`.
+`run`/`start` loads the global profile plus any registered advanced projects. `check` prefers the global profile so it works from any directory.
+`auth print-local-token` prefers the global local token, then falls back to a project token.
+Routing is handled entirely by the adapter server via `model = mimo_adapter/global/<real_model>` or `mimo_adapter/<project_key>/<real_model>`.
 ### Sanity check
 
 ```powershell

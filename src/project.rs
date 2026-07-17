@@ -8,6 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const PROJECT_ENV_FILENAME: &str = ".codex-mimo-adapter.env";
+pub const GLOBAL_ENV_FILENAME: &str = "global.env";
+pub const GLOBAL_PROJECT_ID: &str = "global";
 const REGISTRY_FILENAME: &str = "project-registry.toml";
 const ADAPTER_TOKEN_SUBJECT: &str = "adapter";
 const PROJECT_ID_PREFIX: &str = "mimo_adapter_";
@@ -139,6 +141,44 @@ pub fn registry_dir_path() -> anyhow::Result<PathBuf> {
         .or_else(|_| std::env::var("HOME"))
         .map_err(|_| anyhow::anyhow!("failed to resolve user home directory"))?;
     Ok(PathBuf::from(home).join(".codex-mimo-adapter"))
+}
+
+pub fn global_env_path() -> anyhow::Result<PathBuf> {
+    Ok(registry_dir_path()?.join(GLOBAL_ENV_FILENAME))
+}
+
+/// Returns project ids that are provably stale. A valid entry is never removed merely
+/// because it is not currently loaded by the adapter.
+pub fn clean_stale_registry(dry_run: bool) -> anyhow::Result<Vec<String>> {
+    let registry_dir = registry_dir_path()?;
+    let mut registry = ProjectRegistry::load(&registry_dir);
+    let stale = stale_project_ids(&registry);
+    if !dry_run && !stale.is_empty() {
+        for project_id in &stale {
+            registry.projects.remove(project_id);
+        }
+        registry.save(&registry_dir)?;
+    }
+    Ok(stale)
+}
+
+fn stale_project_ids(registry: &ProjectRegistry) -> Vec<String> {
+    registry
+        .projects
+        .iter()
+        .filter_map(|(project_id, entry)| {
+            let root = PathBuf::from(&entry.root);
+            let env_path = root.join(PROJECT_ENV_FILENAME);
+            let valid = root.is_dir()
+                && env_path.is_file()
+                && read_project_env(&env_path)
+                    .ok()
+                    .and_then(|env| env.get("CODEX_MIMO_PROJECT_ID").cloned())
+                    .as_deref()
+                    == Some(project_id.as_str());
+            (!valid).then(|| project_id.clone())
+        })
+        .collect()
 }
 
 // --------------------------------------------------------------------------
@@ -425,4 +465,41 @@ pub fn parse_env_text(contents: &str) -> anyhow::Result<HashMap<String, String>>
 
 pub fn current_environment() -> HashMap<String, String> {
     std::env::vars().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn stale_registry_detection_only_returns_provably_invalid_entries() {
+        let root = std::env::temp_dir().join(format!("mimo-registry-test-{}", Uuid::new_v4()));
+        let valid_root = root.join("valid");
+        let mismatched_root = root.join("mismatched");
+        std::fs::create_dir_all(&valid_root).unwrap();
+        std::fs::create_dir_all(&mismatched_root).unwrap();
+        std::fs::write(
+            valid_root.join(PROJECT_ENV_FILENAME),
+            "CODEX_MIMO_PROJECT_ID=valid-project\n",
+        )
+        .unwrap();
+        std::fs::write(
+            mismatched_root.join(PROJECT_ENV_FILENAME),
+            "CODEX_MIMO_PROJECT_ID=some-other-project\n",
+        )
+        .unwrap();
+
+        let mut registry = ProjectRegistry::default();
+        registry.upsert_project("valid-project", &valid_root);
+        registry.upsert_project("mismatched-project", &mismatched_root);
+        registry.upsert_project("missing-project", &root.join("missing"));
+
+        let mut stale = stale_project_ids(&registry);
+        stale.sort();
+        assert_eq!(stale, vec!["mismatched-project", "missing-project"]);
+        assert!(registry.projects.contains_key("valid-project"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

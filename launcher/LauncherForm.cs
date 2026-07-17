@@ -40,6 +40,7 @@ internal sealed class LauncherForm : Form
     private readonly Button _restart = new() { Text = "重启", Width = 64, Enabled = false };
     private readonly Button _saveKey = new() { Text = "保存密钥", AutoSize = true };
     private readonly Button _clearKey = new() { Text = "清除", AutoSize = true };
+    private readonly Button _cleanRegistry = new() { Text = "清理失效项目", AutoSize = true };
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 3_000 };
     private readonly NotifyIcon _tray;
     private readonly LauncherPaths _paths;
@@ -64,8 +65,8 @@ internal sealed class LauncherForm : Form
         Text = "Codex MiMo";
         FormBorderStyle = FormBorderStyle.FixedToolWindow;
         StartPosition = FormStartPosition.Manual;
-        Location = new Point(Math.Max(0, Screen.PrimaryScreen?.WorkingArea.Right - 340 ?? 0), 80);
-        Size = new Size(332, 224);
+        Location = new Point(Math.Max(0, Screen.PrimaryScreen?.WorkingArea.Right - 380 ?? 0), 80);
+        Size = new Size(372, 224);
         MinimumSize = Size;
         MaximumSize = Size;
         TopMost = true;
@@ -92,6 +93,7 @@ internal sealed class LauncherForm : Form
         _restart.Click += async (_, _) => await RestartAsync();
         _saveKey.Click += (_, _) => SaveKey();
         _clearKey.Click += (_, _) => ClearKey();
+        _cleanRegistry.Click += async (_, _) => await CleanStaleRegistryAsync();
         _refreshTimer.Tick += async (_, _) => await RefreshStatusAsync();
         _refreshTimer.Start();
         Shown += async (_, _) => await RefreshStatusAsync();
@@ -128,6 +130,7 @@ internal sealed class LauncherForm : Form
         var keyButtons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
         keyButtons.Controls.Add(_saveKey);
         keyButtons.Controls.Add(_clearKey);
+        keyButtons.Controls.Add(_cleanRegistry);
         table.Controls.Add(keyButtons, 0, 1);
 
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
@@ -159,30 +162,11 @@ internal sealed class LauncherForm : Form
             return;
         }
 
-        var sharedConfiguration = SharedConfigurationProbe.Inspect(_paths);
-        if (sharedConfiguration.IsAvailable)
-        {
-            await StartWithExistingConfigurationAsync();
-            return;
-        }
-        if (sharedConfiguration.BlocksInitialization)
-        {
-            SetStatus(sharedConfiguration.Message, Color.Firebrick);
-            return;
-        }
-
-        var sharedStartupNotice = sharedConfiguration.Message;
-        if (!string.IsNullOrWhiteSpace(sharedStartupNotice))
-            AppendLog("shared-startup", sharedStartupNotice, null, null);
-
         LoadSavedKeyIfNeeded();
         var apiKey = _apiKey.Text.Trim();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            var message = string.IsNullOrWhiteSpace(sharedStartupNotice)
-                ? "需要先输入并保存 MiMo API Key。"
-                : $"{sharedStartupNotice} 请先输入并保存 MiMo API Key。";
-            SetStatus(message, Color.Firebrick);
+            SetStatus("需要先输入并保存 MiMo API Key。", Color.Firebrick);
             _apiKey.Focus();
             return;
         }
@@ -191,16 +175,8 @@ internal sealed class LauncherForm : Form
         try
         {
             SaveKey();
-            var initializationStatus = GetInitializationStatus();
-            if (initializationStatus is not null)
-            {
-                var message = string.IsNullOrWhiteSpace(sharedStartupNotice)
-                    ? initializationStatus
-                    : $"{sharedStartupNotice} {initializationStatus}";
-                SetStatus(message, Color.DimGray);
-                var initialized = await RunInitializationAsync(apiKey);
-                if (!initialized) return;
-            }
+            SetStatus("正在配置全局 MiMo 路由与九个全局子代理…", Color.DimGray);
+            if (!await RunGlobalInitializationAsync(apiKey)) return;
             if (!TryConfigureCodexAuthCommand(out var configurationError))
             {
                 SetStatus($"Codex 鉴权配置失败：{configurationError}", Color.Firebrick);
@@ -218,6 +194,38 @@ internal sealed class LauncherForm : Form
         finally
         {
             SetBusy(false);
+        }
+    }
+
+    private async Task<bool> RunGlobalInitializationAsync(string apiKey)
+    {
+        var startInfo = CreateCoreStartInfo("global-init", "--api-key-stdin");
+        using var process = new Process { StartInfo = startInfo };
+        try
+        {
+            if (!process.Start())
+            {
+                SetStatus("无法启动全局初始化程序。", Color.Firebrick);
+                return false;
+            }
+            await process.StandardInput.WriteLineAsync(apiKey);
+            process.StandardInput.Close();
+            var stdout = await process.StandardOutput.ReadToEndAsync();
+            var stderr = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            if (process.ExitCode != 0)
+            {
+                AppendLog("global-init", stdout, stderr, apiKey);
+                SetStatus("全局初始化失败。请查看启动器日志。", Color.Firebrick);
+                return false;
+            }
+            AppendLog("global-init", stdout, stderr, apiKey);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"全局初始化异常：{ReadableError(ex)}", Color.Firebrick);
+            return false;
         }
     }
 
@@ -622,6 +630,50 @@ internal sealed class LauncherForm : Form
         SetStatus("已清除启动器保存的 API Key。", Color.DimGray);
     }
 
+    private async Task CleanStaleRegistryAsync()
+    {
+        if (_busy || !EnsureRuntimeValidated()) return;
+        ClearPinnedError();
+        SetBusy(true);
+        try
+        {
+            var preview = await RunCoreUtilityAsync("clean-registry", "--dry-run");
+            var match = Regex.Match(preview, @"(?m)^stale_count=(\d+)$");
+            if (!match.Success || !Int32.TryParse(match.Groups[1].Value, out var count))
+                throw new InvalidOperationException("无法读取失效项目扫描结果。");
+            if (count == 0)
+            {
+                SetStatus("未发现可安全清理的失效项目。", Color.DimGray);
+                return;
+            }
+            if (MessageBox.Show($"发现 {count} 个项目目录或环境文件已失效。仅删除这些注册表条目，是否继续？", "清理失效项目", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            {
+                SetStatus("已取消清理失效项目。", Color.DimGray);
+                return;
+            }
+            var result = await RunCoreUtilityAsync("clean-registry");
+            SetStatus($"已清理 {count} 个失效项目。请重启适配器以刷新路由。", Color.DimGray);
+            AppendLog("clean-registry", result, null, null);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"清理失效项目失败：{ReadableError(ex)}", Color.Firebrick);
+        }
+        finally { SetBusy(false); }
+    }
+
+    private async Task<string> RunCoreUtilityAsync(params string[] arguments)
+    {
+        var info = CreateCoreStartInfo(arguments);
+        using var process = new Process { StartInfo = info };
+        if (!process.Start()) throw new InvalidOperationException("无法启动核心工具。");
+        var stdout = await process.StandardOutput.ReadToEndAsync();
+        var stderr = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0) throw new InvalidOperationException(String.IsNullOrWhiteSpace(stderr) ? stdout : stderr);
+        return stdout;
+    }
+
     private void LoadSavedKeyIfNeeded()
     {
         if (_hasLoadedSavedKey) return;
@@ -633,7 +685,7 @@ internal sealed class LauncherForm : Form
     private void SetBusy(bool busy)
     {
         _busy = busy;
-        _start.Enabled = _check.Enabled = _saveKey.Enabled = _clearKey.Enabled = !busy;
+        _start.Enabled = _check.Enabled = _saveKey.Enabled = _clearKey.Enabled = _cleanRegistry.Enabled = !busy;
         _stop.Enabled = !busy && _adapter is { HasExited: false };
         _restart.Enabled = !busy && _adapter is { HasExited: false };
         UseWaitCursor = busy;
@@ -731,7 +783,7 @@ internal sealed class LauncherForm : Form
 
 internal sealed class LauncherPaths
 {
-    public const string LauncherVersion = "0.1.0";
+    public const string LauncherVersion = "0.2.4";
     private const string RuntimeRelativePath = "runtime\\windows-x64\\codex-mimo-adapter.exe";
     public DirectoryInfo RepositoryRoot { get; }
     public DirectoryInfo RuntimeDirectory => new(Path.Combine(RepositoryRoot.FullName, "runtime", "windows-x64"));

@@ -148,6 +148,45 @@ pub fn run_init(args: InitArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn run_global_init(args: InitArgs) -> anyhow::Result<()> {
+    let logger = InitLogger::new()?;
+    logger.log("global init started")?;
+    let api_key = match args.api_key {
+        Some(value) if !value.trim().is_empty() => value,
+        _ if args.api_key_stdin => read_api_key_from_stdin()?,
+        _ => prompt("MiMo API key")?,
+    };
+    anyhow::ensure!(!api_key.trim().is_empty(), "MiMo API key is required");
+    let local_token = format!("codex-mimo-{}", Uuid::new_v4().simple());
+    let global_env = format!(
+        "{PROJECT_ENV_API_KEY_SOURCE}={PROCESS_ENV_API_KEY_SOURCE}\nCODEX_MIMO_LOCAL_TOKEN={local_token}\nCODEX_MIMO_HOST={}\nCODEX_MIMO_PORT={}\nMIMO_API_BASE_URL={}\nCODEX_MIMO_STATE_DB=global-state.sqlite\nCODEX_MIMO_STATE_TTL_SECONDS={}\nCODEX_MIMO_TIMEOUT_SECONDS={}\nCODEX_MIMO_MAX_REQUEST_BYTES={}\nCODEX_MIMO_MAX_CONCURRENCY={}\n",
+        args.host, args.port, args.upstream_base, DEFAULT_STATE_TTL_SECONDS, DEFAULT_TIMEOUT_SECONDS, DEFAULT_MAX_REQUEST_BYTES, DEFAULT_MAX_CONCURRENCY);
+    let config_path = global_codex_config_path()?;
+    let mut writes = vec![
+        PendingChange::write(
+            config_path.clone(),
+            build_global_codex_config(&config_path, args.port)?.into_bytes(),
+        ),
+        PendingChange::write(user_dir()?.join("global.env"), global_env.into_bytes()),
+    ];
+    let agents_dir = global_codex_agents_dir()?;
+    for (name, template) in MANAGED_AGENT_TEMPLATES {
+        writes.push(PendingChange::write(
+            agents_dir.join(name),
+            route_agent_template(template, "global")?.into_bytes(),
+        ));
+    }
+    writes.extend(
+        LEGACY_MANAGED_AGENT_FILES
+            .iter()
+            .map(|name| PendingChange::delete(agents_dir.join(name))),
+    );
+    apply_writes_with_rollback(writes, &logger)?;
+    logger.log("global init completed successfully")?;
+    println!("Global initialization complete.");
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum ApiKeySource {
     ProjectEnv,
@@ -194,11 +233,29 @@ fn route_agent_template(template: &str, project_key: &str) -> anyhow::Result<Str
     Ok(document.to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_agent_template_uses_the_stable_global_route() {
+        let rendered = route_agent_template(MANAGED_AGENT_TEMPLATES[0].1, "global").unwrap();
+        assert!(rendered.contains("model = \"mimo_adapter/global/mimo/"));
+    }
+}
+
 fn global_codex_config_path() -> anyhow::Result<PathBuf> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .context("failed to resolve user home directory")?;
     Ok(PathBuf::from(home).join(".codex").join("config.toml"))
+}
+
+fn global_codex_agents_dir() -> anyhow::Result<PathBuf> {
+    Ok(global_codex_config_path()?
+        .parent()
+        .expect("config path has parent")
+        .join("agents"))
 }
 
 fn user_dir() -> anyhow::Result<PathBuf> {

@@ -11,10 +11,21 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     Init(InitArgs),
+    /// Configure the stable user-level adapter profile and global agent templates.
+    GlobalInit(InitArgs),
+    /// Remove registry entries whose project root or environment is no longer valid.
+    CleanRegistry(CleanRegistryArgs),
     Run(RunArgs),
     Start(RunArgs),
     Check,
     Auth(AuthArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct CleanRegistryArgs {
+    /// Report stale entries without changing the registry.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Args, Clone)]

@@ -23,7 +23,8 @@ use crate::media_guard::{
 };
 use crate::project::{
     current_environment, project_id_from_key, project_key_from_id, read_project_env,
-    registry_dir_path, validate_adapter_token, ProjectRegistry, PROJECT_ENV_FILENAME,
+    registry_dir_path, validate_adapter_token, ProjectRegistry, GLOBAL_PROJECT_ID,
+    PROJECT_ENV_FILENAME,
 };
 use crate::state::{now_ts, StateStore};
 use crate::upstream::{
@@ -673,7 +674,9 @@ async fn admin_refresh(State(state): State<AppState>, headers: HeaderMap) -> Res
     let mut removed = Vec::new();
     let to_remove: Vec<String> = projects
         .keys()
-        .filter(|id| !registry.projects.contains_key(id.as_str()))
+        .filter(|id| {
+            id.as_str() != GLOBAL_PROJECT_ID && !registry.projects.contains_key(id.as_str())
+        })
         .cloned()
         .collect();
     for id in &to_remove {
@@ -781,7 +784,12 @@ fn parse_routed_model(model: &str) -> Result<(String, String), &'static str> {
     if upstream_model.is_empty() {
         return Err("real model id is empty");
     }
-    Ok((project_id_from_key(project_key), upstream_model.to_string()))
+    let project_id = if project_key == GLOBAL_PROJECT_ID {
+        GLOBAL_PROJECT_ID.to_string()
+    } else {
+        project_id_from_key(project_key)
+    };
+    Ok((project_id, upstream_model.to_string()))
 }
 
 fn error_response(status: StatusCode, kind: &str, message: &str) -> Response {
@@ -983,6 +991,14 @@ mod tests {
                 "output_tokens_details": {"reasoning_tokens": 0},
                 "total_tokens": 0
             })
+        );
+    }
+
+    #[test]
+    fn global_route_resolves_without_a_project_registry_id() {
+        assert_eq!(
+            parse_routed_model("mimo_adapter/global/mimo/mimo-v2.5"),
+            Ok(("global".to_string(), "mimo-v2.5".to_string()))
         );
     }
 }

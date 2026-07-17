@@ -11,21 +11,21 @@
 3. 双击解压根目录的 `CodexMiMoLauncher.exe`。它会显示一个置顶的小窗口，也会在系统托盘保留图标。
 4. 在 `MiMo API Key` 输入框粘贴你的 MiMo Token Plan API Key。
 5. 点击“保存密钥”。
-6. 点击“启动”，状态显示“运行中”后，重启 Codex Desktop；之后保持启动器运行。需要确认时点“检查”，需要停止或再次启动时点“关闭”或“重启”。关闭窗口只会最小化到托盘；从托盘菜单选择“退出启动器”才会退出。
+6. 点击“启动”。首次启动会配置当前 Windows 用户的全局 MiMo 路由和 9 个子代理；状态显示“运行中”后，重启 Codex Desktop。之后保持启动器运行。需要确认时点“检查”，需要停止或再次启动时点“关闭”或“重启”。关闭窗口只会最小化到托盘；从托盘菜单选择“退出启动器”才会关闭适配器后退出。
 
 这条路径不需要安装 Rust、.NET SDK、PowerShell 或独立 Codex CLI。也**不能**用裸 `git clone`，更不能只下载 core-only runtime artifact：启动器、核心适配器和它们的 manifest 必须保持在同一个解压根目录内。
 
-### 开发设备：无感切换到 Release 核心
+### 全局路由与旧项目兼容
 
-如果此 Windows 用户已有一个可用的单项目适配器配置，Launcher 的“启动”会优先复用它：不会写入 Release 解压目录、不会添加项目注册表项、不会改写 `%USERPROFILE%\.codex\config.toml`，也不会保存或读取启动器自己的 API Key。它只用 Release 核心 EXE 启动已注册项目，因此可在停止开发实例后无感切换。
+启动器会把 9 个受管理子代理写到 `%USERPROFILE%\.codex\agents\`，统一使用稳定路由 `mimo_adapter/global/mimo/<模型>`。因此无论你从哪个项目打开 Codex，首次派单都不再依赖该项目是否写入注册表。
 
-共享启动要求现有注册表恰好有一个有效项目，项目环境文件中已有 API Key 和本地 Token，且 Provider 仍指向 `http://127.0.0.1:4010/v1`。开发设备必须使用未初始化的全新 Release 解压目录；检测到多项目、残留注册表或不兼容 Provider 时，Launcher 会拒绝启动且不自动回退到初始化，以避免修改现有配置。没有现有适配器配置的普通用户仍走上面的首次初始化流程。
+旧版项目级 `init` 和 `mimo_adapter/<project_key>/mimo/<模型>` 路由仍然兼容，适合需要单独 API Key 或高级多项目配置的用户；新用户不需要执行它。
 
-共享预检只验证非敏感的结构兼容性；真正的可用性仍以启动后的健康检查为准。
+如果以前移动、删除过项目目录，可点击“清理失效项目”。程序会先扫描，只删除以下可确认失效的注册表项：项目目录不存在、项目环境文件不存在、或环境文件的项目 ID 与注册表不一致；有效项目不会因当前未加载而被删除。
 
 ### 使用前应知道的安全与完整性保护
 
-- 启动器用当前 Windows 用户的 DPAPI 保存 API Key，保存位置在用户 LocalAppData 目录下、项目仓库之外；密钥不作为命令行参数传递，也不会写入项目配置文件。
+- 启动器用当前 Windows 用户的 DPAPI 保存 API Key，保存位置在用户 LocalAppData 目录下、项目仓库之外；密钥不作为命令行参数传递，也不会写入项目或全局配置文件。全局配置只保存本机适配器的鉴权 token。
 - 每次启动前，启动器都会读取 `runtime/windows-x64/manifest.json`，检查平台、最低启动器版本和核心 EXE 的 SHA-256。检查失败时不要强行运行；重新获取完整组合包。
 - 适配器仅在本机 `127.0.0.1:4010` 提供服务。启动器不会接管已由其他程序启动的适配器。
 
@@ -38,6 +38,7 @@
 | “端口 4010 被其他程序占用” | 先退出占用该端口的程序，或回到已有适配器的启动器管理它；本启动器不会关闭外部进程。 |
 | 点击启动后仍未运行 | 点“检查”并查看状态；确认 API Key 已保存且有效。仍失败时保留启动器日志并联系发布者。 |
 | Codex Desktop 没有使用适配器 | 在启动器显示“运行中”后完全退出并重新打开 Codex Desktop。 |
+| 旧项目报“route is not loaded” | 使用新版启动器点击“启动”，让它写入全局路由；若项目已删除，可点击“清理失效项目”。 |
 
 ## 发布者：构建并提供组合包
 
@@ -46,7 +47,7 @@
 ### 在 CI 中生成包（推荐）
 
 1. 提交并推送需要发布的代码。
-2. 若只需 Artifact，可在 GitHub Actions 手动运行 `Windows Runtime` 工作流；手动运行不会创建 GitHub Release。若需发布，请推送与 `Cargo.toml` 中 `version` 完全匹配的 `v<version>` 标签，例如 `v0.2.3`。
+2. 若只需 Artifact，可在 GitHub Actions 手动运行 `Windows Runtime` 工作流；手动运行不会创建 GitHub Release。若需发布，请推送与 `Cargo.toml` 中 `version` 完全匹配的 `v<version>` 标签，例如 `v0.2.4`。
 3. 等待 `Build Windows x64 runtime` 成功。
 4. 所有运行都会上传 artifact `codex-mimo-adapter-windows-x64-<提交号>`。标签运行还会创建或更新对应的 GitHub Release，并上传 `codex-mimo-adapter-windows-x64-v<version>.zip`。
 5. Release ZIP 保留 `codex-mimo-adapter-windows-x64/` 根目录；解压后从该目录运行 `CodexMiMoLauncher.exe`。

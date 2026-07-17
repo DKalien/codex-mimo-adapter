@@ -3,10 +3,11 @@ use codex_mimo_adapter::cli::{AuthCommands, Cli, Commands, RunArgs};
 use codex_mimo_adapter::config::{
     Config, ConfigOverrides, DEFAULT_HOST, DEFAULT_MAX_CONCURRENCY, DEFAULT_PORT,
 };
-use codex_mimo_adapter::init::run_init;
+use codex_mimo_adapter::init::{run_global_init, run_init};
 use codex_mimo_adapter::project::{
-    current_environment, read_project_env, registry_dir_path, sign_adapter_token, ProjectPaths,
-    ProjectRegistry, PROJECT_ENV_FILENAME,
+    clean_stale_registry, current_environment, global_env_path, read_project_env,
+    registry_dir_path, sign_adapter_token, ProjectPaths, ProjectRegistry, GLOBAL_PROJECT_ID,
+    PROJECT_ENV_FILENAME,
 };
 use codex_mimo_adapter::server::{router, AppState, ProjectRuntime};
 use codex_mimo_adapter::state::StateStore;
@@ -24,6 +25,15 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Init(args) => run_init(args),
+        Commands::GlobalInit(args) => run_global_init(args),
+        Commands::CleanRegistry(args) => {
+            let stale = clean_stale_registry(args.dry_run)?;
+            println!("stale_count={}", stale.len());
+            for project_id in stale {
+                println!("stale_project={project_id}");
+            }
+            Ok(())
+        }
         Commands::Run(args) | Commands::Start(args) => run_server(args).await,
         Commands::Check => run_check().await,
         Commands::Auth(args) => match args.command {
@@ -39,11 +49,6 @@ async fn main() -> anyhow::Result<()> {
 async fn run_server(args: RunArgs) -> anyhow::Result<()> {
     let reg_dir = registry_dir_path()?;
     let registry = ProjectRegistry::load(&reg_dir);
-    if registry.projects.is_empty() {
-        return Err(anyhow::anyhow!(
-            "No projects found in registry. Run 'codex-mimo-adapter init' first."
-        ));
-    }
 
     // Shared config overrides used during startup and runtime refresh.
     let config_overrides = ConfigOverrides {
@@ -60,6 +65,34 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
     };
 
     let mut projects = std::collections::HashMap::new();
+    if let Ok(global_path) = global_env_path() {
+        if global_path.exists() {
+            let global_env = read_project_env(&global_path)?;
+            let config = Config::from_sources(
+                &global_env,
+                &current_environment(),
+                config_overrides.clone(),
+            )?;
+            let state = StateStore::new(
+                reg_dir.join(&config.state_db).display().to_string(),
+                config.state_ttl_seconds,
+            )?;
+            let client = MimoClient::new(
+                &config.upstream_base,
+                &config.upstream_key,
+                config.timeout_seconds,
+            )?;
+            projects.insert(
+                GLOBAL_PROJECT_ID.to_string(),
+                ProjectRuntime {
+                    config,
+                    client,
+                    state,
+                },
+            );
+            tracing::info!("loaded global adapter profile");
+        }
+    }
     for (project_id, entry) in &registry.projects {
         let root = std::path::PathBuf::from(&entry.root);
         let env_path = root.join(PROJECT_ENV_FILENAME);
@@ -98,7 +131,7 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
     }
     if projects.is_empty() {
         return Err(anyhow::anyhow!(
-            "No valid projects could be loaded from the registry."
+            "No projects found in registry. Run 'codex-mimo-adapter init' first."
         ));
     }
     let host = args
@@ -128,27 +161,34 @@ async fn run_server(args: RunArgs) -> anyhow::Result<()> {
 async fn run_check() -> anyhow::Result<()> {
     let client = reqwest::Client::new();
 
-    // Phase 1: Resolve project context for host/port/token.
-    // If no project context is available, fall back to defaults for a basic health check.
-    let (base, config) = match load_project_config(RunArgs::default()) {
-        Ok(config) => {
-            let base = format!("http://{}:{}", config.host, config.port);
-            (base, Some(config))
-        }
-        Err(error) => {
-            eprintln!("Warning: could not load project config: {error}");
-            let base = format!("http://{}:{}", DEFAULT_HOST, DEFAULT_PORT);
-            (base, None)
+    // Prefer the global profile so `check` works from any workspace and does
+    // not require the upstream API key just to authenticate a local models request.
+    let target = match load_global_check_target()? {
+        Some(target) => Some(target),
+        None => {
+            match load_project_config(RunArgs::default()) {
+                Ok(config) => Some(CheckTarget {
+                    base: format!("http://{}:{}", config.host, config.port),
+                    local_token: config.local_token,
+                }),
+                Err(error) => {
+                    eprintln!("Warning: could not load project config (global profile unavailable): {error}");
+                    None
+                }
+            }
         }
     };
+    let base = target
+        .as_ref()
+        .map(|target| target.base.clone())
+        .unwrap_or_else(|| format!("http://{}:{}", DEFAULT_HOST, DEFAULT_PORT));
 
-    // Phase 2: Health check works without project context.
     let health = client
         .get(format!("{base}/health"))
         .send()
         .await
         .map_err(|_| {
-            if config.is_some() {
+            if target.is_some() {
                 anyhow::anyhow!(
                     "Adapter is not running at {base}. Start it with 'codex-mimo-adapter run' or 'codex-mimo-adapter start'."
                 )
@@ -166,17 +206,15 @@ async fn run_check() -> anyhow::Result<()> {
     );
     println!("\u{2713} Adapter health check passed at {base}");
 
-    // Phase 3: Models check requires project context.
-    match config {
-        Some(config) => {
-            let raw_token = config
+    match target {
+        Some(target) => {
+            let raw_token = target
                 .local_token
-                .as_deref()
                 .filter(|v| !v.is_empty())
                 .ok_or_else(|| {
-                    anyhow::anyhow!("CODEX_MIMO_LOCAL_TOKEN is missing in project config")
+                    anyhow::anyhow!("CODEX_MIMO_LOCAL_TOKEN is missing in adapter config")
                 })?;
-            let signed_token = sign_adapter_token(raw_token);
+            let signed_token = sign_adapter_token(&raw_token);
 
             let models = client
                 .get(format!("{base}/v1/models"))
@@ -190,14 +228,56 @@ async fn run_check() -> anyhow::Result<()> {
         None => {
             println!("\u{2713} Adapter is reachable.");
             println!("  For full verification including /v1/models, run from a project directory");
-            println!("  or set CODEX_MIMO_PROJECT_ID to your project ID.");
+            println!("  or initialize the global launcher profile.");
         }
     }
 
     Ok(())
 }
 
+struct CheckTarget {
+    base: String,
+    local_token: Option<String>,
+}
+
+fn load_global_check_target() -> anyhow::Result<Option<CheckTarget>> {
+    let path = global_env_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let env = read_project_env(&path)?;
+    let host = env
+        .get("CODEX_MIMO_HOST")
+        .filter(|value| !value.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| DEFAULT_HOST.to_string());
+    let port = env
+        .get("CODEX_MIMO_PORT")
+        .map(|value| {
+            value.parse::<u16>().map_err(|error| {
+                anyhow::anyhow!("invalid CODEX_MIMO_PORT in global config: {error}")
+            })
+        })
+        .transpose()?
+        .unwrap_or(DEFAULT_PORT);
+    Ok(Some(CheckTarget {
+        base: format!("http://{host}:{port}"),
+        local_token: env.get("CODEX_MIMO_LOCAL_TOKEN").cloned(),
+    }))
+}
+
 fn load_adapter_token_secret() -> anyhow::Result<String> {
+    if let Ok(path) = global_env_path() {
+        if path.exists() {
+            let global_env = read_project_env(&path)?;
+            if let Some(token) = global_env
+                .get("CODEX_MIMO_LOCAL_TOKEN")
+                .filter(|value| !value.is_empty())
+            {
+                return Ok(token.to_string());
+            }
+        }
+    }
     if let Ok(cwd) = std::env::current_dir() {
         let paths = ProjectPaths::discover_from(&cwd);
         if paths.env_file.exists() {
