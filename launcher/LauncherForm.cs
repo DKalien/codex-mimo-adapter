@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -272,8 +274,12 @@ internal sealed class LauncherForm : Form
         var legacyFiles = LegacyAgentFiles
             .Where(fileName => File.Exists(Path.Combine(agentsDirectory, fileName)))
             .ToArray();
+        var expectedProjectKey = GetProjectKeyForRepository();
+        var staleRouteFiles = ManagedAgentFiles
+            .Where(fileName => !AgentTargetsProjectKey(Path.Combine(agentsDirectory, fileName), expectedProjectKey))
+            .ToArray();
 
-        if (missingManagedFiles.Length == 0 && legacyFiles.Length == 0)
+        if (missingManagedFiles.Length == 0 && legacyFiles.Length == 0 && staleRouteFiles.Length == 0)
             return null;
 
         var details = new List<string>();
@@ -281,7 +287,35 @@ internal sealed class LauncherForm : Form
             details.Add($"缺少 {missingManagedFiles.Length} 个九模板配置");
         if (legacyFiles.Length > 0)
             details.Add($"检测到 {legacyFiles.Length} 个旧版配置");
+        if (staleRouteFiles.Length > 0)
+            details.Add($"检测到 {staleRouteFiles.Length} 个其他设备生成的项目路由");
         return $"正在升级子代理配置（{string.Join("；", details)}）…";
+    }
+
+    private string GetProjectKeyForRepository()
+    {
+        var root = Path.GetFullPath(_paths.RepositoryRoot.FullName)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        // Rust's canonicalize on Windows uses the extended-length path form.
+        // Match it so the launcher detects exactly the same project key as `init`.
+        if (!root.StartsWith("\\\\?\\", StringComparison.Ordinal))
+            root = root.StartsWith("\\\\", StringComparison.Ordinal)
+                ? "\\\\?\\UNC\\" + root[2..]
+                : "\\\\?\\" + root;
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(root));
+        return Convert.ToHexString(hash.AsSpan(0, 6)).ToLowerInvariant();
+    }
+
+    private static bool AgentTargetsProjectKey(string agentPath, string projectKey)
+    {
+        try
+        {
+            var expectedModelPrefix = $"mimo_adapter/{projectKey}/mimo/";
+            return File.ReadLines(agentPath).Any(line =>
+                Regex.IsMatch(line, $"^\\s*model\\s*=\\s*[\"']{Regex.Escape(expectedModelPrefix)}"));
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
     }
 
     private async Task<bool> RunInitializationAsync(string apiKey)
@@ -812,7 +846,12 @@ internal readonly record struct SharedConfigurationProbe(bool IsAvailable, bool 
                 return Block("Release 目录含有其他项目的初始化残留；共享启动不会改写现有配置。请使用全新解压的 Release 组合包。");
             }
             if (roots.Count != 1)
-                return Block("现有项目注册表不是单项目状态；共享启动不会修改多项目配置。");
+            {
+                var activeRoots = roots.Count(root => File.Exists(Path.Combine(NormalizeRoot(root), ".codex-mimo-adapter.env")));
+                if (activeRoots == 0)
+                    return Notice($"检测到 {roots.Count} 个失效的旧项目注册表，已跳过共享启动并开始首次配置。");
+                return Block($"现有项目注册表包含 {activeRoots} 个仍有效项目；为避免改写多项目配置，未执行初始化。");
+            }
 
             var projectRoot = NormalizeRoot(roots[0]);
             if (PathsEqual(projectRoot, paths.RepositoryRoot.FullName))
