@@ -8,6 +8,7 @@ pub const DEFAULT_UPSTREAM_BASE: &str = "https://token-plan-cn.xiaomimimo.com/v1
 pub const DEFAULT_STATE_DB: &str = ".codex-mimo/state.sqlite";
 pub const DEFAULT_STATE_TTL_SECONDS: i64 = 21_600;
 pub const DEFAULT_TIMEOUT_SECONDS: u64 = 300;
+pub const DEFAULT_STREAM_IDLE_TIMEOUT_MS: i64 = 360_000;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_MAX_CONCURRENCY: usize = 8;
 pub const PROJECT_ENV_API_KEY_SOURCE: &str = "CODEX_MIMO_API_KEY_SOURCE";

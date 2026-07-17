@@ -1,8 +1,8 @@
 use crate::cli::InitArgs;
 use crate::config::{
     DEFAULT_HOST, DEFAULT_MAX_CONCURRENCY, DEFAULT_MAX_REQUEST_BYTES, DEFAULT_STATE_DB,
-    DEFAULT_STATE_TTL_SECONDS, DEFAULT_TIMEOUT_SECONDS, PROCESS_ENV_API_KEY_SOURCE,
-    PROJECT_ENV_API_KEY_SOURCE,
+    DEFAULT_STATE_TTL_SECONDS, DEFAULT_STREAM_IDLE_TIMEOUT_MS, DEFAULT_TIMEOUT_SECONDS,
+    PROCESS_ENV_API_KEY_SOURCE, PROJECT_ENV_API_KEY_SOURCE,
 };
 use crate::project::{generate_project_id, project_key_from_id, ProjectPaths, ProjectRegistry};
 use anyhow::{anyhow, Context};
@@ -242,6 +242,22 @@ mod tests {
         let rendered = route_agent_template(MANAGED_AGENT_TEMPLATES[0].1, "global").unwrap();
         assert!(rendered.contains("model = \"mimo_adapter/global/mimo/"));
     }
+
+    #[test]
+    fn generated_provider_idle_timeout_exceeds_the_upstream_request_timeout() {
+        let path = std::env::temp_dir().join(format!(
+            "codex-mimo-config-{}.toml",
+            Uuid::new_v4().simple()
+        ));
+        let rendered = build_global_codex_config(&path, crate::config::DEFAULT_PORT).unwrap();
+        let document = rendered.parse::<DocumentMut>().unwrap();
+        let idle_timeout = document["model_providers"]["mimo_adapter"]["stream_idle_timeout_ms"]
+            .as_integer()
+            .unwrap();
+
+        assert_eq!(idle_timeout, DEFAULT_STREAM_IDLE_TIMEOUT_MS);
+        assert!(idle_timeout > (DEFAULT_TIMEOUT_SECONDS * 1_000) as i64);
+    }
 }
 
 fn global_codex_config_path() -> anyhow::Result<PathBuf> {
@@ -286,7 +302,7 @@ fn build_global_codex_config(path: &Path, port: u16) -> anyhow::Result<String> {
     provider["wire_api"] = value("responses");
     provider["request_max_retries"] = value(0);
     provider["stream_max_retries"] = value(0);
-    provider["stream_idle_timeout_ms"] = value(120000);
+    provider["stream_idle_timeout_ms"] = value(DEFAULT_STREAM_IDLE_TIMEOUT_MS);
 
     let auth = ensure_subtable(provider, "auth")?;
     auth["command"] = value("codex-mimo-adapter");
