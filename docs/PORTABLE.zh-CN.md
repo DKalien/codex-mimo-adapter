@@ -46,7 +46,7 @@
 ### 在 CI 中生成包（推荐）
 
 1. 提交并推送需要发布的代码。
-2. 若只需 Artifact，可在 GitHub Actions 手动运行 `Windows Runtime` 工作流；手动运行不会创建 GitHub Release。若需发布，请推送与 `Cargo.toml` 中 `version` 完全匹配的 `v<version>` 标签，例如 `v0.2.1`。
+2. 若只需 Artifact，可在 GitHub Actions 手动运行 `Windows Runtime` 工作流；手动运行不会创建 GitHub Release。若需发布，请推送与 `Cargo.toml` 中 `version` 完全匹配的 `v<version>` 标签，例如 `v0.2.2`。
 3. 等待 `Build Windows x64 runtime` 成功。
 4. 所有运行都会上传 artifact `codex-mimo-adapter-windows-x64-<提交号>`。标签运行还会创建或更新对应的 GitHub Release，并上传 `codex-mimo-adapter-windows-x64-v<version>.zip`。
 5. Release ZIP 保留 `codex-mimo-adapter-windows-x64/` 根目录；解压后从该目录运行 `CodexMiMoLauncher.exe`。

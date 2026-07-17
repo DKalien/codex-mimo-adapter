@@ -46,6 +46,8 @@ internal sealed class LauncherForm : Form
     private Process? _adapter;
     private RuntimeValidation _runtimeValidation;
     private bool _busy;
+    // Background polling must not replace an actionable failure before the user can read it.
+    private bool _hasPinnedError;
     private bool _hasLoadedSavedKey;
     private bool _exitRequested;
     // This is set before StopAsync reaches its first await. It prevents the Exited callback
@@ -137,6 +139,7 @@ internal sealed class LauncherForm : Form
     private async Task StartAsync()
     {
         if (_busy) return;
+        ClearPinnedError();
         if (!EnsureRuntimeValidated()) return;
         if (_adapter is { HasExited: false })
         {
@@ -166,11 +169,18 @@ internal sealed class LauncherForm : Form
             return;
         }
 
+        var sharedStartupNotice = sharedConfiguration.Message;
+        if (!string.IsNullOrWhiteSpace(sharedStartupNotice))
+            AppendLog("shared-startup", sharedStartupNotice, null, null);
+
         LoadSavedKeyIfNeeded();
         var apiKey = _apiKey.Text.Trim();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            SetStatus("需要先输入并保存 MiMo API Key。", Color.Firebrick);
+            var message = string.IsNullOrWhiteSpace(sharedStartupNotice)
+                ? "需要先输入并保存 MiMo API Key。"
+                : $"{sharedStartupNotice} 请先输入并保存 MiMo API Key。";
+            SetStatus(message, Color.Firebrick);
             _apiKey.Focus();
             return;
         }
@@ -182,7 +192,10 @@ internal sealed class LauncherForm : Form
             var initializationStatus = GetInitializationStatus();
             if (initializationStatus is not null)
             {
-                SetStatus(initializationStatus, Color.DimGray);
+                var message = string.IsNullOrWhiteSpace(sharedStartupNotice)
+                    ? initializationStatus
+                    : $"{sharedStartupNotice} {initializationStatus}";
+                SetStatus(message, Color.DimGray);
                 var initialized = await RunInitializationAsync(apiKey);
                 if (!initialized) return;
             }
@@ -305,6 +318,7 @@ internal sealed class LauncherForm : Form
 
     private async Task<bool> StopAsync()
     {
+        ClearPinnedError();
         var adapter = _adapter;
         if (adapter is null)
         {
@@ -359,6 +373,7 @@ internal sealed class LauncherForm : Form
 
     private async Task CheckAsync()
     {
+        ClearPinnedError();
         if (!EnsureRuntimeValidated()) return;
         SetBusy(true);
         try
@@ -378,19 +393,19 @@ internal sealed class LauncherForm : Form
         _runtime.Text = _runtimeValidation.Description;
         if (await IsHealthyAsync())
         {
-            SetStatus(_adapter is { HasExited: false } ? "运行中（由此启动器管理）。" : "运行中（外部进程）。", Color.ForestGreen);
+            SetRefreshedStatus(_adapter is { HasExited: false } ? "运行中（由此启动器管理）。" : "运行中（外部进程）。", Color.ForestGreen);
             return;
         }
         if (_adapter is { HasExited: false })
         {
-            SetStatus("启动中或健康检查未通过…", Color.DarkGoldenrod);
+            SetRefreshedStatus("启动中或健康检查未通过…", Color.DarkGoldenrod);
             return;
         }
         _stop.Enabled = _restart.Enabled = false;
         if (_runtimeValidation.IsValid)
-            SetStatus("已就绪，等待启动。", Color.DimGray);
+            SetRefreshedStatus("已就绪，等待启动。", Color.DimGray);
         else
-            SetStatus(_runtimeValidation.Description, Color.Firebrick);
+            SetRefreshedStatus(_runtimeValidation.Description, Color.Firebrick);
     }
 
     private async Task WaitForHealthyAsync()
@@ -546,6 +561,7 @@ internal sealed class LauncherForm : Form
 
     private void SaveKey()
     {
+        ClearPinnedError();
         var value = _apiKey.Text.Trim();
         if (string.IsNullOrEmpty(value))
         {
@@ -565,6 +581,7 @@ internal sealed class LauncherForm : Form
 
     private void ClearKey()
     {
+        ClearPinnedError();
         _hasLoadedSavedKey = true;
         _apiKey.Clear();
         _secrets.Clear();
@@ -590,10 +607,22 @@ internal sealed class LauncherForm : Form
 
     private void SetStatus(string message, Color color)
     {
+        if (color.ToArgb() == Color.Firebrick.ToArgb())
+            _hasPinnedError = true;
+        else if (color.ToArgb() == Color.ForestGreen.ToArgb())
+            _hasPinnedError = false;
         _status.Text = message;
         _status.ForeColor = color;
         _tray.Text = message.Length > 63 ? "Codex MiMo Launcher" : message;
     }
+
+    private void SetRefreshedStatus(string message, Color color)
+    {
+        if (_hasPinnedError && color.ToArgb() != Color.ForestGreen.ToArgb()) return;
+        SetStatus(message, color);
+    }
+
+    private void ClearPinnedError() => _hasPinnedError = false;
 
     private void AppendLog(string category, string? stdout, string? stderr, string? secret)
     {
@@ -791,7 +820,7 @@ internal readonly record struct SharedConfigurationProbe(bool IsAvailable, bool 
 
             var projectEnv = Path.Combine(projectRoot, ".codex-mimo-adapter.env");
             if (!File.Exists(projectEnv))
-                return Block("注册表中的现有项目缺少 .codex-mimo-adapter.env；未执行共享启动。");
+                return Notice("检测到失效的旧项目注册表，已跳过共享启动并开始首次配置。");
             if (!HasPersistedProjectCredentials(projectEnv))
                 return Block("现有项目未保存可复用的本地凭据；未执行共享启动。");
             if (!HasCompatibleProviderConfiguration(configPath))
@@ -806,6 +835,8 @@ internal readonly record struct SharedConfigurationProbe(bool IsAvailable, bool 
     }
 
     private static SharedConfigurationProbe NotApplicable() => new(false, false, "");
+
+    private static SharedConfigurationProbe Notice(string message) => new(false, false, message);
 
     private static SharedConfigurationProbe Block(string message) => new(false, true, message);
 

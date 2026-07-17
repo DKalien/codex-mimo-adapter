@@ -36,6 +36,15 @@ Think like a Tech Lead, not an Individual Contributor.
 
 多个子代理并发前，应说明整体编排及各自职责。
 
+### V1 Runtime Rules
+
+* 使用 `multi_agent_v1` 选择已配置的 OSS 模板时，`spawn_agent` 必须显式设置目标 `agent_type`，同时使用 `fork_context=false`，并在 `message` 中完整提供 Workspace、Goal、Scope、Constraints、Acceptance 与 Validation。
+* 禁止把 `fork_context=true` 与显式 `agent_type`、`model` 或 `reasoning_effort` 组合使用；完整历史分叉会继承父代理配置，运行时会拒绝上述组合。
+* `wait_agent` 返回 `timed_out=true` 只表示本次等待窗口内没有代理进入最终状态，不代表代理失败、挂起或上游请求超时。不得仅凭一次或多次等待超时关闭或重派代理。
+* 只读分析任务默认允许至少 10 分钟累计执行时间；实现或测试任务默认允许至少 15 分钟累计执行时间。可用不超过 60 秒的等待/轮询保持进度更新，但累计窗口未到且没有明确错误时应继续等待原代理。
+* 不得用 `send_input(interrupt=true)` 轮询状态；该操作会中断子代理当前 turn。仅在确实需要停止当前工作并改写任务时使用中断。
+* 只有出现明确最终错误、用户要求停止，或在达到累计等待窗口后通过独立证据确认无进展，才可调用 `close_agent`。重派前必须先结束旧代理，避免同一工作区出现重叠实现。
+
 ## Review
 
 收到子代理结果后，主代理负责：
