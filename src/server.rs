@@ -384,9 +384,14 @@ async fn stream_response(
             Ok(mut stream) => {
                 let mut buffer = String::new();
                 let mut utf8_remainder: Vec<u8> = Vec::new();
+                let mut upstream_chunk_count = 0_u64;
+                let mut upstream_byte_count = 0_u64;
                 while let Some(chunk) = stream.next().await {
                     match chunk {
                         Ok(bytes) => {
+                            upstream_chunk_count = upstream_chunk_count.saturating_add(1);
+                            upstream_byte_count =
+                                upstream_byte_count.saturating_add(bytes.len() as u64);
                             for block in
                                 parse_chat_sse_bytes(&mut buffer, &mut utf8_remainder, &bytes)
                             {
@@ -489,6 +494,16 @@ async fn stream_response(
                             }
                         }
                         Err(error) => {
+                            tracing::error!(
+                                error = ?error,
+                                error_display = %error,
+                                is_body = error.is_body(),
+                                is_decode = error.is_decode(),
+                                is_timeout = error.is_timeout(),
+                                upstream_chunk_count,
+                                upstream_byte_count,
+                                "upstream response body stream failed"
+                            );
                             let message = error.to_string();
                             let kind = upstream_stream_error_type(&message);
                             let display = upstream_stream_error_message(&message);
