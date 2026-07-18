@@ -783,7 +783,7 @@ internal sealed class LauncherForm : Form
 
 internal sealed class LauncherPaths
 {
-    public const string LauncherVersion = "0.2.5";
+    public const string LauncherVersion = "0.2.6";
     private const string RuntimeRelativePath = "runtime\\windows-x64\\codex-mimo-adapter.exe";
     public DirectoryInfo RepositoryRoot { get; }
     public DirectoryInfo RuntimeDirectory => new(Path.Combine(RepositoryRoot.FullName, "runtime", "windows-x64"));
