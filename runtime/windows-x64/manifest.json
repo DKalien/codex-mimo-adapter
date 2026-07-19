@@ -1,0 +1,12 @@
+{
+    "schema_version":  1,
+    "platform":  "windows-x64",
+    "adapter":  {
+                    "name":  "codex-mimo-adapter",
+                    "version":  "0.2.4",
+                    "file":  "codex-mimo-adapter.exe",
+                    "sha256":  "60d22af106ab667f36b8770b1a2dfea1c87c9a1873fb73a326cb804bfa3473e3"
+                },
+    "minimum_launcher_version":  "0.1.0",
+    "generated_at_utc":  "2026-07-17T05:34:55.2876038Z"
+}
