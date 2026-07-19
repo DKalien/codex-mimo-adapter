@@ -1,7 +1,7 @@
 use crate::cli::InitArgs;
 use crate::config::{
     DEFAULT_HOST, DEFAULT_MAX_CONCURRENCY, DEFAULT_MAX_REQUEST_BYTES, DEFAULT_STATE_DB,
-    DEFAULT_STATE_TTL_SECONDS, DEFAULT_TIMEOUT_SECONDS,
+    DEFAULT_STATE_TTL_SECONDS, DEFAULT_STREAM_IDLE_TIMEOUT_MS, DEFAULT_TIMEOUT_SECONDS,
 };
 use crate::project::{generate_project_id, project_key_from_id, ProjectPaths, ProjectRegistry};
 use anyhow::{anyhow, Context};
@@ -166,7 +166,7 @@ fn build_global_codex_config(path: &Path, port: u16) -> anyhow::Result<String> {
     provider["wire_api"] = value("responses");
     provider["request_max_retries"] = value(0);
     provider["stream_max_retries"] = value(0);
-    provider["stream_idle_timeout_ms"] = value(120000);
+    provider["stream_idle_timeout_ms"] = value(DEFAULT_STREAM_IDLE_TIMEOUT_MS);
 
     let auth = ensure_subtable(provider, "auth")?;
     auth["command"] = value("codex-opencode-adapter");
@@ -195,6 +195,28 @@ fn ensure_subtable<'a>(table: &'a mut Table, key: &str) -> anyhow::Result<&'a mu
     table[key]
         .as_table_mut()
         .ok_or_else(|| anyhow!("{key} must be a TOML table"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_provider_idle_timeout_exceeds_upstream_request_timeout() {
+        let path = std::env::temp_dir().join(format!(
+            "codex-opencode-config-{}.toml",
+            Uuid::new_v4().simple()
+        ));
+        let rendered = build_global_codex_config(&path, crate::config::DEFAULT_PORT).unwrap();
+        let document = rendered.parse::<DocumentMut>().unwrap();
+        let idle_timeout = document["model_providers"]["opencode_go_adapter"]
+            ["stream_idle_timeout_ms"]
+            .as_integer()
+            .unwrap();
+
+        assert_eq!(idle_timeout, DEFAULT_STREAM_IDLE_TIMEOUT_MS);
+        assert!(idle_timeout > (DEFAULT_TIMEOUT_SECONDS * 1_000) as i64);
+    }
 }
 
 fn create_backup_if_exists(path: &Path) -> anyhow::Result<Option<PathBuf>> {

@@ -1,5 +1,6 @@
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::sse::KeepAlive;
 use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -9,6 +10,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
@@ -30,6 +32,12 @@ use crate::upstream::{
     extract_error_message, parse_chat_sse_bytes, sse_data_from_block, sse_event_from_block,
     OpenCodeGoClient, UpstreamError,
 };
+
+const DOWNSTREAM_SSE_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+fn downstream_sse_keep_alive(interval: Duration) -> KeepAlive {
+    KeepAlive::new().interval(interval).text("keep-alive")
+}
 
 #[derive(Clone)]
 pub struct ProjectRuntime {
@@ -541,7 +549,11 @@ async fn stream_response(
     });
 
     let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
-    Sse::new(stream).into_response()
+    Sse::new(stream)
+        .keep_alive(downstream_sse_keep_alive(
+            DOWNSTREAM_SSE_KEEP_ALIVE_INTERVAL,
+        ))
+        .into_response()
 }
 
 fn previous_response(
@@ -930,5 +942,29 @@ fn upstream_error(error: UpstreamError) -> Response {
         UpstreamError::Network(message) | UpstreamError::Invalid(message) => {
             error_response(StatusCode::BAD_GATEWAY, "upstream_error", &message)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn downstream_sse_emits_keep_alive_while_response_stream_is_idle() {
+        let stream = futures::stream::pending::<
+            Result<axum::response::sse::Event, std::convert::Infallible>,
+        >();
+        let response = Sse::new(stream)
+            .keep_alive(downstream_sse_keep_alive(Duration::from_millis(5)))
+            .into_response();
+        let mut body = response.into_body().into_data_stream();
+
+        let chunk = tokio::time::timeout(Duration::from_millis(100), body.next())
+            .await
+            .expect("keep-alive should arrive before the test timeout")
+            .expect("SSE body should still be open")
+            .expect("keep-alive body chunk should be readable");
+
+        assert_eq!(std::str::from_utf8(&chunk).unwrap(), ": keep-alive\n\n");
     }
 }

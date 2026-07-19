@@ -21,6 +21,7 @@ pub struct OpenCodeGoClient {
     base_url: String,
     api_key: String,
     client: reqwest::Client,
+    stream_client: reqwest::Client,
 }
 
 impl OpenCodeGoClient {
@@ -29,11 +30,14 @@ impl OpenCodeGoClient {
         api_key: impl Into<String>,
         timeout_seconds: u64,
     ) -> anyhow::Result<Self> {
+        let timeout = Duration::from_secs(timeout_seconds);
         Ok(Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             api_key: api_key.into(),
-            client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds))
+            client: reqwest::Client::builder().timeout(timeout).build()?,
+            stream_client: reqwest::Client::builder()
+                .connect_timeout(timeout)
+                .read_timeout(timeout)
                 .build()?,
         })
     }
@@ -55,7 +59,7 @@ impl OpenCodeGoClient {
     ) -> Result<impl Stream<Item = Result<Bytes, reqwest::Error>>, UpstreamError> {
         payload["stream"] = Value::Bool(true);
         let response = self
-            .client
+            .stream_client
             .post(format!("{}/chat/completions", self.base_url))
             .headers(self.headers("text/event-stream")?)
             .json(&payload)
@@ -213,6 +217,7 @@ pub fn sse_data_from_block(block: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt as _;
     use serde_json::json;
 
     // ── extract_error_message ──
@@ -382,5 +387,43 @@ mod tests {
         let block = "data:   {\"key\":\"value\"}";
         let data = sse_data_from_block(block).unwrap();
         assert_eq!(data, "{\"key\":\"value\"}");
+    }
+
+    #[tokio::test]
+    async fn streaming_request_can_outlive_nonstream_total_timeout() {
+        async fn slow_stream() -> axum::response::Sse<
+            impl futures::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+        > {
+            let stream = async_stream::stream! {
+                for index in 0..4 {
+                    tokio::time::sleep(Duration::from_millis(350)).await;
+                    yield Ok(axum::response::sse::Event::default()
+                        .data(json!({"chunk": index}).to_string()));
+                }
+            };
+            axum::response::Sse::new(stream)
+        }
+
+        let app = axum::Router::new().route("/chat/completions", axum::routing::post(slow_stream));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = OpenCodeGoClient::new(format!("http://{address}"), "test-key", 1).unwrap();
+        let started = std::time::Instant::now();
+        let mut stream = client
+            .chat_stream(json!({"model": "test-model"}))
+            .await
+            .unwrap();
+        let mut chunks = 0;
+        while let Some(chunk) = stream.next().await {
+            chunk.expect("each SSE body chunk should arrive before the read timeout");
+            chunks += 1;
+        }
+
+        assert!(started.elapsed() > Duration::from_secs(1));
+        assert!(chunks >= 4);
     }
 }

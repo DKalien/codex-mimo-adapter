@@ -17,7 +17,7 @@ base_url = "http://127.0.0.1:4010/v1"
 wire_api = "responses"
 request_max_retries = 0
 stream_max_retries = 0
-stream_idle_timeout_ms = 120000
+stream_idle_timeout_ms = 360000
 
 [model_providers.opencode_go_adapter.auth]
 command = "codex-opencode-adapter"
